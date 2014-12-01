@@ -1,0 +1,26 @@
+{
+    "name": "xstefanox/sapone",
+    "description": "A PHP SOAP client generator",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Stefano Varesi",
+            "email": "stefano.varesi@gmail.com"
+        }
+    ],
+    "require": {
+        "php": ">=5.3",
+        "ext-soap": "*",
+        "symfony/console": "~2.5",
+        "zendframework/zend-code": "~2.3",
+        "symfony/filesystem": "~2.3",
+        "fabpot/php-cs-fixer": "~1.0"
+    },
+    "require-dev": {
+    },
+    "autoload": {
+        "psr-4": {
+            "Sapone": "src/"
+        }
+    }
+}
