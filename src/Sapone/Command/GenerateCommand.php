@@ -2,6 +2,7 @@
 
 namespace Sapone\Command;
 
+use Html2Text\Html2Text;
 use Sapone\Wsdl\XmlType;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -71,7 +72,7 @@ class GenerateCommand extends Command
          * LOAD THE WSDL DOCUMENT
          */
         $wsdl = simplexml_load_file($wsdlPath);
-        $wsdl->registerXPathNamespace('xsd', static::NAMESPACE_XSD);
+        $wsdl->registerXPathNamespace('s', static::NAMESPACE_XSD);
         $wsdl->registerXPathNamespace('wsdl', static::NAMESPACE_WSDL);
         $wsdlNamespaces = $wsdl->getDocNamespaces();
 
@@ -89,6 +90,11 @@ class GenerateCommand extends Command
             $serviceClass->setExtendedClass('\SoapClient');
             $serviceClass->setNamespaceName($namespace);
 
+            $documentation = new Html2Text((string) current($port->xpath('./wsdl:documentation')));
+            if ($documentation->getText()) {
+                $serviceClass->setDocBlock(new DocBlockGenerator($documentation->getText()));
+            }
+
             // create the constructor
             $constructor = new MethodGenerator('__construct');
             $constructor->setParameter(new ParameterGenerator('wsdl', 'string'));
@@ -101,6 +107,7 @@ class GenerateCommand extends Command
             $constructor->setDocBlock($constructorDocBlock);
             $serviceClass->addMethodFromGenerator($constructor);
 
+            // create the service methods
             foreach ($port->xpath('.//wsdl:operation') as $operation) {
 
                 $operationName = $this->validateType((string) $operation['name']);
@@ -109,6 +116,7 @@ class GenerateCommand extends Command
                 $outputXmlType = $this->parseXmlType((string) current($operation->xpath('.//wsdl:output/@message')));
                 $inputMessageType = $this->validateType($inputXmlType->name);
                 $outputMessageType = $this->validateType($outputXmlType->name);
+                $documentation = new Html2Text((string) current($operation->xpath('.//wsdl:documentation')));
 
                 // read the name and type of the messages
                 $fqInputMessageType = ($structuredNamespace ? $namespace  . '\\' . static::DEFAULT_NAMESPACE_MESSAGE . '\\' : '') . $inputMessageType;
@@ -124,6 +132,7 @@ class GenerateCommand extends Command
                 $doc = new DocBlockGenerator();
                 $doc->setTag(new ParamTag('parameters', $fqDocBlockInputMessageType));
                 $doc->setTag(new ReturnTag($fqDocBlockOutputMessageType));
+                $doc->setShortDescription($documentation->getText());
 
                 // create the parameter
                 $param = new ParameterGenerator('parameters', $inputMessageType);
@@ -147,18 +156,44 @@ class GenerateCommand extends Command
                     $messageClass->setName($messageName);
                     $messageClass->setNamespaceName($namespace . ($structuredNamespace ? '\\' . static::DEFAULT_NAMESPACE_MESSAGE : ''));
 
+                    $documentation = new Html2Text((string) current($message->xpath('./wsdl:documentation')));
+                    if ($documentation->getText()) {
+                        $messageClass->setDocBlock(new DocBlockGenerator($documentation->getText()));
+                    }
+
                     foreach ($message->xpath('.//wsdl:part') as $part) {
 
                         $partName = (string) $part['name'];
 
-                        $xmlType = $this->parseXmlType((string) ($part['type'] ? $part['type'] : $part['element']));
+                        if ($part['type']) {
+                            // for document-style messages
+                            $xmlType = $this->parseXmlType((string) $part['type']);
+                        } else {
+                            // for rpc-style messages
+                            $element = current($wsdl->xpath(sprintf('//wsdl:types//s:element[@name="%s"]', $this->parseXmlType((string) $part['element'])->name)));
+
+                            // if the element references a type
+                            if ($element['type']) {
+                                $xmlType = $this->parseXmlType((string) $element['type']);
+                            } else {
+                                // the element type is defined inline
+                                $xmlType = $this->parseXmlType((string) $element['name']);
+                            }
+
+                            // if the element uses the current target namespace
+                            if ($xmlType->namespacePrefix === null) {
+                                $xmlType->namespacePrefix = array_search((string) current($wsdl->xpath(sprintf('//wsdl:types//s:element[@name="%s"]/ancestor::*[@targetNamespace]/@targetNamespace', $this->parseXmlType((string) $part['element'])->name))), $wsdlNamespaces);
+                            }
+                        }
+
                         $partType = $this->validateType($xmlType->name);
                         $typeIsPrimitive = $wsdlNamespaces[$xmlType->namespacePrefix] === static::NAMESPACE_XSD;
                         $fqPartType = ($typeIsPrimitive ? '' : $namespace . '\\' . ($structuredNamespace ? static::DEFAULT_NAMESPACE_TYPE . '\\' : '')) . $partType;
                         $fqDocBlockPartType = (($typeIsPrimitive or empty($namespace)) ? '' : '\\') . $fqPartType;
 
                         // create the comment
-                        $doc = new DocBlockGenerator();
+                        $documentation = new Html2Text((string) current($part->xpath('./wsdl:documentation')));
+                        $doc = new DocBlockGenerator($documentation->getText());
                         $doc->setTag(new GenericTag('var', $fqDocBlockPartType));
 
                         // create the property
@@ -220,11 +255,18 @@ class GenerateCommand extends Command
          * GENERATE THE TYPE CLASSES
          */
 
-        foreach ($wsdl->xpath('//xsd:complexType') as $complexType) {
+        foreach ($wsdl->xpath('//wsdl:types//s:complexType') as $complexType) {
 
-            $complexTypeName = $this->validateType((string) $complexType['name']);
-            $fqComplexTypeName = $namespace . ($structuredNamespace ? '\\' . static::DEFAULT_NAMESPACE_TYPE : '') . $complexTypeName;
-            $extendedXmlType = $this->parseXmlType((string) current($complexType->xpath('.//xsd:extension/@base')));
+            $complexTypeName = (string) $complexType['name'];
+
+            // if the complex type has been defined inside an element
+            if (empty($complexTypeName)) {
+                $complexTypeName = (string) current($complexType->xpath('./ancestor::*[@name]/@name'));
+            }
+
+            $complexTypeName = $this->validateType($complexTypeName);
+            $fqComplexTypeName = $namespace . '\\' . ($structuredNamespace ? static::DEFAULT_NAMESPACE_TYPE . '\\' : '') . $complexTypeName;
+            $extendedXmlType = $this->parseXmlType((string) current($complexType->xpath('.//s:extension/@base')));
             $extendedTypeName = $this->validateType($extendedXmlType->name);
 
             // create the class
@@ -236,7 +278,7 @@ class GenerateCommand extends Command
             }
             $complexTypeClass->setNamespaceName($namespace . ($structuredNamespace ? '\\' . static::DEFAULT_NAMESPACE_TYPE : ''));
 
-            foreach ($complexType->xpath('.//xsd:element') as $element) {
+            foreach ($complexType->xpath('.//s:element') as $element) {
 
                 $elementName = (string) $element['name'];
 
@@ -245,10 +287,12 @@ class GenerateCommand extends Command
                 $typeIsPrimitive = $wsdlNamespaces[$xmlType->namespacePrefix] === static::NAMESPACE_XSD;
                 $fqElementType = ($typeIsPrimitive ? '' : ($namespace . '\\' . ($structuredNamespace ? static::DEFAULT_NAMESPACE_TYPE . '\\' : ''))) . $elementType;
                 $fqDocBlockElementType = ($typeIsPrimitive ? '' : '\\') . $fqElementType;
+                $documentation = new Html2Text((string) current($element->xpath('.//wsdl:documentation')));
 
                 // create the comment
                 $doc = new DocBlockGenerator();
                 $doc->setTag(new GenericTag('var', $fqDocBlockElementType));
+                $doc->setShortDescription($documentation->getText());
 
                 // create the property
                 $property = new PropertyGenerator($elementName);
@@ -315,13 +359,13 @@ class GenerateCommand extends Command
 //                $name = explode(' ', array_shift($lines));
 //                $name = $name[1];
 //
-//                $typeNode = $wsdl->xpath("//xsd:complexType[@name='{$name}']");
+//                $typeNode = $wsdl->xpath("//s:complexType[@name='{$name}']");
 //
 //                // create the class
 //                $serviceClass = new ClassGenerator();
 //                $serviceClass->setName($name);
 //                $serviceClass->setAbstract((boolean) $typeNode[0]['abstract']);
-//                $serviceClass->setExtendedClass(preg_replace('/^\w+:/', '', (string) current($typeNode[0]->xpath('.//xsd:extension/@base'))));
+//                $serviceClass->setExtendedClass(preg_replace('/^\w+:/', '', (string) current($typeNode[0]->xpath('.//s:extension/@base'))));
 //
 //                // create the constructor
 //                $constructor = new MethodGenerator('__construct');
@@ -402,11 +446,11 @@ class GenerateCommand extends Command
 
     protected function parseXmlType($type)
     {
-        preg_match('/^(?<prefix>\w+):(?<name>.*$)/', $type, $matches);
+        preg_match('/^((?<prefix>\w+):)?(?<name>.*$)/', $type, $matches);
 
         return new XmlType(
-            array_key_exists('prefix', $matches) ? $matches['prefix'] : null,
-            array_key_exists('name', $matches) ? $matches['name'] : null
+            (array_key_exists('prefix', $matches) and !empty($matches['prefix'])) ? $matches['prefix'] : null,
+            (array_key_exists('name', $matches) and !empty($matches['name'])) ? $matches['name'] : null
         );
     }
 

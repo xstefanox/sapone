@@ -14,13 +14,14 @@
         "symfony/console": "~2.5",
         "zendframework/zend-code": "~2.3",
         "symfony/filesystem": "~2.3",
-        "fabpot/php-cs-fixer": "~1.0"
+        "fabpot/php-cs-fixer": "~1.0",
+        "html2text/html2text": "~2.0"
     },
     "require-dev": {
     },
     "autoload": {
-        "psr-4": {
-            "Sapone": "src/"
+        "psr-0": {
+            "Sapone\\": "src/"
         }
     }
 }
