@@ -11,8 +11,9 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Process\Exception\LogicException;
-use Symfony\CS\Config\Config;
 use Symfony\CS\Fixer;
+use Symfony\CS\Config\Config as FixerConfig;
+use Symfony\CS\FixerInterface;
 use Zend\Code\Generator\AbstractGenerator;
 use Zend\Code\Generator\AbstractMemberGenerator;
 use Zend\Code\Generator\ClassGenerator;
@@ -326,6 +327,68 @@ class GenerateCommand extends Command
             file_put_contents("{$outputPath}/{$complexTypeName}.php", $file->generate());
         }
 
+        /*
+         * GENERATE THE ENUM CLASSES
+         */
+
+        foreach ($wsdl->xpath('//wsdl:types//s:simpleType') as $simpleType) {
+
+            $simpleTypeName = (string) $simpleType['name'];
+
+            // if the simple type has been defined inside an element
+            if (empty($simpleTypeName)) {
+                $simpleTypeName = (string) current($simpleType->xpath('./ancestor::*[@name]/@name'));
+            }
+
+            $simpleTypeName = $this->validateType($simpleTypeName);
+            $fqSimpleTypeName = $namespace . '\\' . ($structuredNamespace ? static::DEFAULT_NAMESPACE_TYPE . '\\' : '') . $simpleTypeName;
+            $extendedXmlType = $this->parseXmlType((string) current($simpleType->xpath('.//s:extension/@base')));
+            $extendedTypeName = $this->validateType($extendedXmlType->name);
+
+            // create the class
+            $simpleTypeClass = new ClassGenerator();
+            $simpleTypeClass->setName($simpleTypeName);
+            if ($extendedXmlType->name) {
+                $simpleTypeClass->setExtendedClass($extendedTypeName);
+            }
+            $simpleTypeClass->setNamespaceName($namespace . ($structuredNamespace ? '\\' . static::DEFAULT_NAMESPACE_TYPE : ''));
+
+            foreach ($simpleType->xpath('.//s:enumeration') as $enumeration) {
+
+                $enumerationValue = (string) $enumeration['value'];
+
+                // create the property
+                $property = new PropertyGenerator($this->validateType($enumerationValue), $enumerationValue);
+                $property->setConst(true);
+                $simpleTypeClass->addPropertyFromGenerator($property);
+            }
+
+            // add the class to the classmap
+            $classmapConstructorBody .= sprintf("\$this['%s'] = '%s';", $simpleTypeName, $fqSimpleTypeName) . AbstractGenerator::LINE_FEED;
+
+            // serialize the class
+            $file = new FileGenerator(array('class' => $simpleTypeClass));
+            $outputPath = "{$basePath}";
+
+            if ($namespaceStyle === 'psr0') {
+
+                $outputPath .= "/{$namespace}";
+
+                if ($structuredNamespace) {
+                    $outputPath .= '/';
+                }
+
+                if ($structuredNamespace) {
+                    $outputPath .= '/' . static::DEFAULT_NAMESPACE_TYPE;
+                }
+
+                $fs->mkdir($outputPath);
+            }
+
+            file_put_contents("{$outputPath}/{$simpleTypeName}.php", $file->generate());
+
+        }
+
         // set the constructor body of the classmap class
         $classmapClass->getMethod('__construct')->setBody($classmapConstructorBody);
 
@@ -434,14 +497,19 @@ class GenerateCommand extends Command
 //                file_put_contents("{$outputPath}/{$name}.php", $file->generate());
 //            }
 
-        // fix the generated code to make it compliant to the PSR-2 coding standards
-        $fixerConfig = new Config();
-        $fixerConfig->setDir($outputPath);
-
+        // create the coding standards fixer
         $fixer = new Fixer();
+        $config = new FixerConfig();
+        $config->setDir($outputPath);
+
+        // register all the existing fixers
         $fixer->registerBuiltInFixers();
-        $fixer->registerBuiltInConfigs();
-        $fixer->fix($fixerConfig);
+        $config->fixers(array_filter($fixer->getFixers(), function(FixerInterface $fixer) {
+            return $fixer->getLevel() === FixerInterface::PSR2_LEVEL;
+        }));
+
+        // fix the generated code
+        $fixer->fix($config);
     }
 
     protected function parseXmlType($type)
