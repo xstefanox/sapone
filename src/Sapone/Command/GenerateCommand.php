@@ -10,7 +10,6 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Filesystem\Filesystem;
-use Symfony\Component\Process\Exception\LogicException;
 use Symfony\CS\Fixer;
 use Symfony\CS\Config\Config as FixerConfig;
 use Symfony\CS\FixerInterface;
@@ -25,6 +24,7 @@ use Zend\Code\Generator\FileGenerator;
 use Zend\Code\Generator\MethodGenerator;
 use Zend\Code\Generator\ParameterGenerator;
 use Zend\Code\Generator\PropertyGenerator;
+use Zend\Code\Generator\ValueGenerator;
 use Zend\Code\Reflection\ClassReflection;
 
 class GenerateCommand extends Command
@@ -44,8 +44,9 @@ class GenerateCommand extends Command
             ->addArgument('namespace', InputArgument::REQUIRED, 'The namespace of the generated code')
             ->addOption('accessors', null, InputOption::VALUE_NONE, 'Enable the generation of setters/getters')
             ->addOption('constructor-null', null, InputOption::VALUE_NONE, 'Default every constructor parameter to null')
-            ->addOption('structured-namespace', null, InputOption::VALUE_NONE, 'Put messages and type in a sub-namespace')
-            ->addOption('namespace-style', null, InputOption::VALUE_REQUIRED, 'The style of the namespace [PSR-0 or PSR-4]', 'psr4');
+            ->addOption('spl-enums', null, InputOption::VALUE_NONE, 'Make the enum classes extend SPL enums')
+            ->addOption('structured-namespace', null, InputOption::VALUE_NONE, 'Put messages and types in a sub-namespace')
+            ->addOption('namespace-style', null, InputOption::VALUE_REQUIRED, 'The style of the namespace [psr0|psr4]', 'psr4');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output)
@@ -60,8 +61,12 @@ class GenerateCommand extends Command
         $structuredNamespace = $input->getOption('structured-namespace');
         $namespaceStyle = $input->getOption('namespace-style');
         if (!in_array(strtolower($namespaceStyle), array('psr0', 'psr4'))) {
-            throw new LogicException("Invalid namespace style: '{$namespaceStyle}'");
+            throw new \InvalidArgumentException("Invalid namespace style: '{$namespaceStyle}'");
         }
+
+        $constructorNull = $input->getOption('constructor-null');
+        $accessors = $input->getOption('accessors');
+        $splEnums = $input->getOption('spl-enums');
 
         /*
          * OUTPUT PREPARATION
@@ -76,6 +81,16 @@ class GenerateCommand extends Command
         $wsdl->registerXPathNamespace('s', static::NAMESPACE_XSD);
         $wsdl->registerXPathNamespace('wsdl', static::NAMESPACE_WSDL);
         $wsdlNamespaces = $wsdl->getDocNamespaces();
+
+        /*
+         * GENERATE THE CLASSMAPPING CLASS
+         */
+
+        $classmapClassName = 'Classmap';
+        $classmapClass = ClassGenerator::fromReflection(new ClassReflection('\Sapone\Template\ClassmapTemplate'));
+        $classmapClass->setName($classmapClassName);
+        $classmapClass->setNamespaceName($namespace);
+        $classmapConstructorBody = '';
 
         /*
          * GENERATE THE SERVICES CLASSES
@@ -100,7 +115,9 @@ class GenerateCommand extends Command
             $constructor = new MethodGenerator('__construct');
             $constructor->setParameter(new ParameterGenerator('wsdl', 'string'));
             $constructor->setParameter(new ParameterGenerator('options', 'array', array()));
-            $constructorBody = 'parent::__construct(\$wsdl, $options);';
+            $constructorBody = '';
+            $constructorBody .= '$options["classmap"] = empty($options["classmap"]) ? new Classmap() : $options["classmap"];' . AbstractGenerator::LINE_FEED;
+            $constructorBody .= AbstractGenerator::LINE_FEED . 'parent::__construct(\$wsdl, $options);' . AbstractGenerator::LINE_FEED;
             $constructor->setBody($constructorBody);
             $constructorDocBlock = new DocBlockGenerator('@see SoapClient::__construct');
             $constructorDocBlock->setTag(new ParamTag('wsdl', 'string'));
@@ -151,11 +168,13 @@ class GenerateCommand extends Command
                 foreach ($wsdl->xpath('//wsdl:message') as $message) {
 
                     $messageName = $this->validateType((string) $message['name']);
+                    $messageNameNamespace = ($namespace . ($structuredNamespace ? '\\' . static::DEFAULT_NAMESPACE_MESSAGE : ''));
+                    $fqMessageName = $messageNameNamespace . '\\' . $messageName;
 
                     // create the class
                     $messageClass = new ClassGenerator();
                     $messageClass->setName($messageName);
-                    $messageClass->setNamespaceName($namespace . ($structuredNamespace ? '\\' . static::DEFAULT_NAMESPACE_MESSAGE : ''));
+                    $messageClass->setNamespaceName($messageNameNamespace);
 
                     $documentation = new Html2Text((string) current($message->xpath('./wsdl:documentation')));
                     if ($documentation->getText()) {
@@ -205,6 +224,9 @@ class GenerateCommand extends Command
 
                     }
 
+                    // add the class to the classmap
+                    $classmapConstructorBody .= $this->generateClassmapEntry($messageName, $fqMessageName);
+
                     // serialize the class
                     $file = new FileGenerator(array('class' => $messageClass));
                     $outputPath = "{$basePath}";
@@ -224,6 +246,8 @@ class GenerateCommand extends Command
                 }
             }
 
+            // there is no need to add the service class to the classmap
+
             // serialize the class
             $file = new FileGenerator(array('class' => $serviceClass));
             $outputPath = "{$basePath}";
@@ -241,16 +265,6 @@ class GenerateCommand extends Command
 
             file_put_contents("{$outputPath}/{$serviceClassName}.php", $file->generate());
         }
-
-        /*
-         * GENERATE THE CLASSMAPPING CLASS
-         */
-
-        $classmapClassName = 'Classmap';
-        $classmapClass = ClassGenerator::fromReflection(new ClassReflection('\Sapone\Template\ClassmapTemplate'));
-        $classmapClass->setName($classmapClassName);
-        $classmapClass->setNamespaceName($namespace);
-        $classmapConstructorBody = '';
 
         /*
          * GENERATE THE TYPE CLASSES
@@ -279,6 +293,12 @@ class GenerateCommand extends Command
             }
             $complexTypeClass->setNamespaceName($namespace . ($structuredNamespace ? '\\' . static::DEFAULT_NAMESPACE_TYPE : ''));
 
+            // create the constructor
+            $constructor = new MethodGenerator('__construct');
+            $constructorDocBlock = new DocBlockGenerator();
+            $constructorBody = '';
+            $complexTypeClass->addMethodFromGenerator($constructor);
+
             foreach ($complexType->xpath('.//s:element') as $element) {
 
                 $elementName = (string) $element['name'];
@@ -288,6 +308,7 @@ class GenerateCommand extends Command
                 $typeIsPrimitive = $wsdlNamespaces[$xmlType->namespacePrefix] === static::NAMESPACE_XSD;
                 $fqElementType = ($typeIsPrimitive ? '' : ($namespace . '\\' . ($structuredNamespace ? static::DEFAULT_NAMESPACE_TYPE . '\\' : ''))) . $elementType;
                 $fqDocBlockElementType = ($typeIsPrimitive ? '' : '\\') . $fqElementType;
+                $elementIsNullable = false;
                 $documentation = new Html2Text((string) current($element->xpath('.//wsdl:documentation')));
 
                 // create the comment
@@ -298,12 +319,52 @@ class GenerateCommand extends Command
                 // create the property
                 $property = new PropertyGenerator($elementName);
                 $property->setDocBlock($doc);
-                $property->setVisibility(AbstractMemberGenerator::VISIBILITY_PUBLIC);
+                $property->setVisibility($accessors ? AbstractMemberGenerator::VISIBILITY_PROTECTED : AbstractMemberGenerator::VISIBILITY_PUBLIC);
                 $complexTypeClass->addPropertyFromGenerator($property);
+
+                $paramTag = new ParamTag($elementName, $fqDocBlockElementType);
+                $param = new ParameterGenerator($elementName, $elementType);
+
+                // set the element nullability
+                if ($elementIsNullable or $constructorNull) {
+                    $param->setDefaultValue(new ValueGenerator(null, ValueGenerator::TYPE_NULL));
+                }
+
+                // add the parameter to the constructor
+                $constructorDocBlock->setTag($paramTag);
+
+                // add the property assignment to the constructor body
+                $constructorBody .= "\$this->{$elementName} = \${$elementName};" . AbstractGenerator::LINE_FEED;
+
+                $constructor->setParameter($param);
+
+                // if the property accessors must be generated
+                if ($accessors) {
+
+                    // create the setter
+                    $accessorDocBlock = new DocBlockGenerator();
+                    $accessorDocBlock->setTag($paramTag);
+                    $setter = new MethodGenerator('set' . ucfirst($elementName));
+                    $setter->setParameter($param);
+                    $setter->setDocBlock($accessorDocBlock);
+                    $setter->setBody("\$this->{$elementName} = \${$elementName};");
+                    $complexTypeClass->addMethodFromGenerator($setter);
+
+                    // create the getter
+                    $accessorDocBlock = new DocBlockGenerator();
+                    $accessorDocBlock->setTag(new ReturnTag($fqDocBlockElementType));
+                    $getter = new MethodGenerator('get' . ucfirst($elementName));
+                    $getter->setDocBlock($accessorDocBlock);
+                    $getter->setBody("return \$this->{$elementName};");
+                    $complexTypeClass->addMethodFromGenerator($getter);
+                }
             }
 
+            $constructor->setDocBlock($constructorDocBlock);
+            $constructor->setBody($constructorBody);
+
             // add the class to the classmap
-            $classmapConstructorBody .= sprintf("\$this['%s'] = '%s';", $complexTypeName, $fqComplexTypeName) . AbstractGenerator::LINE_FEED;
+            $classmapConstructorBody .= $this->generateClassmapEntry($complexTypeName, $fqComplexTypeName);
 
             // serialize the class
             $file = new FileGenerator(array('class' => $complexTypeClass));
@@ -349,7 +410,11 @@ class GenerateCommand extends Command
             $simpleTypeClass = new ClassGenerator();
             $simpleTypeClass->setName($simpleTypeName);
             if ($extendedXmlType->name) {
+                // this type extends another, it will indirectly extend \SplEnum
                 $simpleTypeClass->setExtendedClass($extendedTypeName);
+            } elseif ($splEnums) {
+                // this class has no parent in the service, so make it extend \SplEnum
+                $simpleTypeClass->setExtendedClass('\SplEnum');
             }
             $simpleTypeClass->setNamespaceName($namespace . ($structuredNamespace ? '\\' . static::DEFAULT_NAMESPACE_TYPE : ''));
 
@@ -364,7 +429,7 @@ class GenerateCommand extends Command
             }
 
             // add the class to the classmap
-            $classmapConstructorBody .= sprintf("\$this['%s'] = '%s';", $simpleTypeName, $fqSimpleTypeName) . AbstractGenerator::LINE_FEED;
+            $classmapConstructorBody .= $this->generateClassmapEntry($simpleTypeName, $fqSimpleTypeName);
 
             // serialize the class
             $file = new FileGenerator(array('class' => $simpleTypeClass));
@@ -409,93 +474,9 @@ class GenerateCommand extends Command
 
         file_put_contents("{$outputPath}/{$classmapClassName}.php", $file->generate());
 
-
-//            foreach ($client->__getTypes() as $type) {
-//
-//                // split the pseudo-C struct definition in lines
-//                $lines = explode(PHP_EOL, $type);
-//
-//                // remove the last line because it contains only the closing brace
-//                array_pop($lines);
-//
-//                // extract the name of the data type
-//                $name = explode(' ', array_shift($lines));
-//                $name = $name[1];
-//
-//                $typeNode = $wsdl->xpath("//s:complexType[@name='{$name}']");
-//
-//                // create the class
-//                $serviceClass = new ClassGenerator();
-//                $serviceClass->setName($name);
-//                $serviceClass->setAbstract((boolean) $typeNode[0]['abstract']);
-//                $serviceClass->setExtendedClass(preg_replace('/^\w+:/', '', (string) current($typeNode[0]->xpath('.//s:extension/@base'))));
-//
-//                // create the constructor
-//                $constructor = new MethodGenerator('__construct');
-//                $constructorDocBlock = new DocBlockGenerator();
-//                $constructorBody = '';
-//
-//                // prepare the property from each line of the struct
-//                foreach ($lines as $idx => $line) {
-//
-//                    // parse the property pseudo-C definition
-//                    preg_match('/(?P<type>\w+)\s(?P<name>\w+)/', trim($line), $matches);
-//
-//                    // convert the xsd type into a valid PHP type
-//                    $matches['type'] = $this->validateType($matches['type']);
-//
-//                    // create the comment
-//                    $doc = new DocBlockGenerator();
-//                    $doc->setTag(new GenericTag('var', $matches['type']));
-//
-//                    // create the property
-//                    $property = new PropertyGenerator($matches['name']);
-//                    $property->setDocBlock($doc);
-//                    $property->setVisibility($input->getOption('accessors') ? AbstractMemberGenerator::VISIBILITY_PROTECTED : AbstractMemberGenerator::VISIBILITY_PUBLIC);
-//                    $serviceClass->addPropertyFromGenerator($property);
-//
-//                    $paramTag = new ParamTag($matches['name'], $matches['type']);
-//                    $param = new ParameterGenerator($matches['name'], $matches['type'], new ValueGenerator(null, ValueGenerator::TYPE_NULL));
-//
-//                    // create the constructor parameter
-//                    $contructorParam = new ParameterGenerator($matches['name'], $matches['type']);
-//                    if ($input->getOption('constructor-null')) {
-//                        $contructorParam->setDefaultValue(new ValueGenerator(null, ValueGenerator::TYPE_NULL));
-//                    }
-//                    $constructor->setParameter($contructorParam);
-//                    $constructorDocBlock->setTag($paramTag);
-//
-//                    // create the constructor body
-//                    $constructorBody .= "\$this->{$matches['name']} = \${$matches['name']};" . AbstractGenerator::LINE_FEED;
-//
-//                    if ($input->getOption('accessors')) {
-//                        // create the setter
-//                        $doc = new DocBlockGenerator();
-//                        $doc->setTag($paramTag);
-//                        $setter = new MethodGenerator('set' . ucfirst($matches['name']));
-//                        $setter->setParameter($param);
-//                        $setter->setDocBlock($doc);
-//                        $setter->setBody("\$this->{$matches['name']} = \${$matches['name']};");
-//                        $serviceClass->addMethodFromGenerator($setter);
-//
-//                        // create the getter
-//                        $doc = new DocBlockGenerator();
-//                        $doc->setTag(new ReturnTag($matches['type']));
-//                        $getter = new MethodGenerator('get' . ucfirst($matches['name']));
-//                        $getter->setDocBlock($doc);
-//                        $getter->setBody("return \$this->{$matches['name']};");
-//                        $serviceClass->addMethodFromGenerator($getter);
-//                    }
-//                }
-//
-//                $constructor->setDocBlock($constructorDocBlock);
-//                $constructor->setBody($constructorBody);
-//                $serviceClass->addMethodFromGenerator($constructor);
-//
-//                // serialize the class
-//                $file = new FileGenerator(array('class' => $serviceClass));
-//                file_put_contents("{$outputPath}/{$name}.php", $file->generate());
-//            }
+        /*
+         * GENERATED CODE FIX
+         */
 
         // create the coding standards fixer
         $fixer = new Fixer();
@@ -526,6 +507,11 @@ class GenerateCommand extends Command
     {
         $tokens = token_get_all("<?php {$string} ?>");
         return $tokens[1][0] !== T_STRING;
+    }
+
+    protected function generateClassmapEntry($soapType, $phpType)
+    {
+        return sprintf("\$this['%s'] = '%s';", $soapType, $phpType) . AbstractGenerator::LINE_FEED;
     }
 
     protected function isValidClassOrMethodName($string)
