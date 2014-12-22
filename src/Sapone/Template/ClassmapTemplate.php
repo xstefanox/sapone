@@ -2,7 +2,7 @@
 
 namespace Sapone\Template;
 
-class ClassmapTemplate
+class ClassmapTemplate implements \ArrayAccess
 {
     protected $container = array();
 

@@ -29,24 +29,82 @@ use Zend\Code\Reflection\ClassReflection;
 
 class GenerateCommand extends Command
 {
+    /**
+     * The namespace of XMLSchema specification
+     *
+     * @var string
+     */
     const NAMESPACE_XSD = 'http://www.w3.org/2001/XMLSchema';
+
+    /**
+     * The namespace of Web Service Definition Language specification
+     * @var string
+     */
     const NAMESPACE_WSDL = 'http://schemas.xmlsoap.org/wsdl/';
 
-    const DEFAULT_NAMESPACE_MESSAGE = 'Message';
-    const DEFAULT_NAMESPACE_TYPE = 'Type';
+    const NAMESPACE_MESSAGE = 'Message';
+    const NAMESPACE_TYPE = 'Type';
 
+    /**
+     * The suffix to append to invalid names.
+     *
+     * @var string
+     */
+    const NAME_SUFFIX = '_';
+
+    protected $namespace;
+    protected $structuredNamespace;
+    
     protected function configure()
     {
         $this
             ->setName('generate')
-            ->addArgument('input', InputArgument::REQUIRED, 'The path to the wsdl')
-            ->addArgument('output', InputArgument::REQUIRED, 'The path to the generated code')
-            ->addArgument('namespace', InputArgument::REQUIRED, 'The namespace of the generated code')
-            ->addOption('accessors', null, InputOption::VALUE_NONE, 'Enable the generation of setters/getters')
-            ->addOption('constructor-null', null, InputOption::VALUE_NONE, 'Default every constructor parameter to null')
-            ->addOption('spl-enums', null, InputOption::VALUE_NONE, 'Make the enum classes extend SPL enums')
-            ->addOption('structured-namespace', null, InputOption::VALUE_NONE, 'Put messages and types in a sub-namespace')
-            ->addOption('namespace-style', null, InputOption::VALUE_REQUIRED, 'The style of the namespace [psr0|psr4]', 'psr4');
+            ->addArgument(
+                'input',
+                InputArgument::REQUIRED,
+                'The path to the wsdl'
+            )
+            ->addArgument(
+                'output',
+                InputArgument::REQUIRED,
+                'The path to the generated code'
+            )
+            ->addArgument(
+                'namespace',
+                InputArgument::REQUIRED,
+                'The namespace of the generated code'
+            )
+            ->addOption(
+                'accessors',
+                null,
+                InputOption::VALUE_NONE,
+                'Enable the generation of setters/getters'
+            )
+            ->addOption(
+                'constructor-null',
+                null,
+                InputOption::VALUE_NONE,
+                'Default every constructor parameter to null'
+            )
+            ->addOption(
+                'spl-enums',
+                null,
+                InputOption::VALUE_NONE,
+                'Make the enum classes extend SPL enums'
+            )
+            ->addOption(
+                'structured-namespace',
+                null,
+                InputOption::VALUE_NONE,
+                'Put messages and types in a sub-namespace'
+            )
+            ->addOption(
+                'namespace-style',
+                null,
+                InputOption::VALUE_REQUIRED,
+                'The style of the namespace [psr0|psr4]',
+                'psr4'
+            );
     }
 
     protected function execute(InputInterface $input, OutputInterface $output)
@@ -57,8 +115,8 @@ class GenerateCommand extends Command
         $wsdlPath = $input->getArgument('input');
         $basePath = $input->getArgument('output');
 
-        $namespace = $input->getArgument('namespace');
-        $structuredNamespace = $input->getOption('structured-namespace');
+        $this->namespace = $input->getArgument('namespace');
+        $this->structuredNamespace = $input->getOption('structured-namespace');
         $namespaceStyle = $input->getOption('namespace-style');
         if (!in_array(strtolower($namespaceStyle), array('psr0', 'psr4'))) {
             throw new \InvalidArgumentException("Invalid namespace style: '{$namespaceStyle}'");
@@ -89,45 +147,30 @@ class GenerateCommand extends Command
         $classmapClassName = 'Classmap';
         $classmapClass = ClassGenerator::fromReflection(new ClassReflection('\Sapone\Template\ClassmapTemplate'));
         $classmapClass->setName($classmapClassName);
-        $classmapClass->setNamespaceName($namespace);
+        $classmapClass->setNamespaceName($this->namespace);
+        $classmapClass->setImplementedInterfaces(array('\ArrayAccess'));
         $classmapConstructorBody = '';
 
         /*
          * GENERATE THE SERVICES CLASSES
          */
         foreach ($wsdl->xpath('//wsdl:portType') as $port) {
-
             $serviceName = (string) $port['name'];
             $serviceClassName = "{$serviceName}Client";
 
             // create the class
-            $serviceClass = new ClassGenerator();
+            $serviceClass = ClassGenerator::fromReflection(new ClassReflection('\Sapone\Template\ServiceTemplate'));
             $serviceClass->setName($serviceClassName);
             $serviceClass->setExtendedClass('\SoapClient');
-            $serviceClass->setNamespaceName($namespace);
+            $serviceClass->setNamespaceName($this->namespace);
 
             $documentation = new Html2Text((string) current($port->xpath('./wsdl:documentation')));
             if ($documentation->getText()) {
                 $serviceClass->setDocBlock(new DocBlockGenerator($documentation->getText()));
             }
 
-            // create the constructor
-            $constructor = new MethodGenerator('__construct');
-            $constructor->setParameter(new ParameterGenerator('wsdl', 'string'));
-            $constructor->setParameter(new ParameterGenerator('options', 'array', array()));
-            $constructorBody = '';
-            $constructorBody .= '$options["classmap"] = empty($options["classmap"]) ? new Classmap() : $options["classmap"];' . AbstractGenerator::LINE_FEED;
-            $constructorBody .= AbstractGenerator::LINE_FEED . 'parent::__construct(\$wsdl, $options);' . AbstractGenerator::LINE_FEED;
-            $constructor->setBody($constructorBody);
-            $constructorDocBlock = new DocBlockGenerator('@see SoapClient::__construct');
-            $constructorDocBlock->setTag(new ParamTag('wsdl', 'string'));
-            $constructorDocBlock->setTag(new ParamTag('options', 'array'));
-            $constructor->setDocBlock($constructorDocBlock);
-            $serviceClass->addMethodFromGenerator($constructor);
-
             // create the service methods
             foreach ($port->xpath('.//wsdl:operation') as $operation) {
-
                 $operationName = $this->validateType((string) $operation['name']);
 
                 $inputXmlType = $this->parseXmlType((string) current($operation->xpath('.//wsdl:input/@message')));
@@ -137,19 +180,17 @@ class GenerateCommand extends Command
                 $documentation = new Html2Text((string) current($operation->xpath('.//wsdl:documentation')));
 
                 // read the name and type of the messages
-                $fqInputMessageType = ($structuredNamespace ? $namespace  . '\\' . static::DEFAULT_NAMESPACE_MESSAGE . '\\' : '') . $inputMessageType;
-                $fqOutputMessageType = ($structuredNamespace ? $namespace . '\\' . static::DEFAULT_NAMESPACE_MESSAGE . '\\' : '') . $outputMessageType;
-                $fqDocBlockInputMessageType = '\\' . $fqInputMessageType;
-                $fqDocBlockOutputMessageType = '\\' . $fqOutputMessageType;
+                $fqInputMessageType = $this->getMessagesClassName($inputMessageType);
+                $fqOutputMessageType = $this->getMessagesClassName($outputMessageType);
 
-                if ($structuredNamespace) {
+                if ($this->structuredNamespace) {
                     $serviceClass->addUse($fqInputMessageType);
                 }
 
                 // create the comment
                 $doc = new DocBlockGenerator();
-                $doc->setTag(new ParamTag('parameters', $fqDocBlockInputMessageType));
-                $doc->setTag(new ReturnTag($fqDocBlockOutputMessageType));
+                $doc->setTag(new ParamTag('parameters', '\\' . $fqInputMessageType));
+                $doc->setTag(new ReturnTag('\\' . $fqOutputMessageType));
                 $doc->setShortDescription($documentation->getText());
 
                 // create the parameter
@@ -166,10 +207,9 @@ class GenerateCommand extends Command
                  * GENERATE THE MESSAGES CLASSES
                  */
                 foreach ($wsdl->xpath('//wsdl:message') as $message) {
-
                     $messageName = $this->validateType((string) $message['name']);
-                    $messageNameNamespace = ($namespace . ($structuredNamespace ? '\\' . static::DEFAULT_NAMESPACE_MESSAGE : ''));
-                    $fqMessageName = $messageNameNamespace . '\\' . $messageName;
+                    $messageNameNamespace = $this->getMessagesNamespace();
+                    $fqMessageName = $this->getMessagesClassName($messageName);
 
                     // create the class
                     $messageClass = new ClassGenerator();
@@ -182,7 +222,6 @@ class GenerateCommand extends Command
                     }
 
                     foreach ($message->xpath('.//wsdl:part') as $part) {
-
                         $partName = (string) $part['name'];
 
                         if ($part['type']) {
@@ -190,7 +229,14 @@ class GenerateCommand extends Command
                             $xmlType = $this->parseXmlType((string) $part['type']);
                         } else {
                             // for rpc-style messages
-                            $element = current($wsdl->xpath(sprintf('//wsdl:types//s:element[@name="%s"]', $this->parseXmlType((string) $part['element'])->name)));
+                            $element = current(
+                                $wsdl->xpath(
+                                    sprintf(
+                                        '//wsdl:types//s:element[@name="%s"]',
+                                        $this->parseXmlType((string) $part['element'])->name
+                                    )
+                                )
+                            );
 
                             // if the element references a type
                             if ($element['type']) {
@@ -201,15 +247,27 @@ class GenerateCommand extends Command
                             }
 
                             // if the element uses the current target namespace
+                            $tnsXPath = '//wsdl:types//s:element[@name="%s"]/' .
+                                        'ancestor::*[@targetNamespace]/@targetNamespace';
                             if ($xmlType->namespacePrefix === null) {
-                                $xmlType->namespacePrefix = array_search((string) current($wsdl->xpath(sprintf('//wsdl:types//s:element[@name="%s"]/ancestor::*[@targetNamespace]/@targetNamespace', $this->parseXmlType((string) $part['element'])->name))), $wsdlNamespaces);
+                                $xmlType->namespacePrefix = array_search(
+                                    (string) current(
+                                        $wsdl->xpath(
+                                            sprintf(
+                                                $tnsXPath,
+                                                $this->parseXmlType((string) $part['element'])->name
+                                            )
+                                        )
+                                    ),
+                                    $wsdlNamespaces
+                                );
                             }
                         }
 
                         $partType = $this->validateType($xmlType->name);
                         $typeIsPrimitive = $wsdlNamespaces[$xmlType->namespacePrefix] === static::NAMESPACE_XSD;
-                        $fqPartType = ($typeIsPrimitive ? '' : $namespace . '\\' . ($structuredNamespace ? static::DEFAULT_NAMESPACE_TYPE . '\\' : '')) . $partType;
-                        $fqDocBlockPartType = (($typeIsPrimitive or empty($namespace)) ? '' : '\\') . $fqPartType;
+                        $fqPartType = ($typeIsPrimitive ? '' : $this->getTypesNamespace() . '\\') . $partType;
+                        $fqDocBlockPartType = ($typeIsPrimitive ? '' : '\\') . $fqPartType;
 
                         // create the comment
                         $documentation = new Html2Text((string) current($part->xpath('./wsdl:documentation')));
@@ -221,7 +279,6 @@ class GenerateCommand extends Command
                         $property->setDocBlock($doc);
                         $property->setVisibility(AbstractMemberGenerator::VISIBILITY_PUBLIC);
                         $messageClass->addPropertyFromGenerator($property);
-
                     }
 
                     // add the class to the classmap
@@ -232,11 +289,10 @@ class GenerateCommand extends Command
                     $outputPath = "{$basePath}";
 
                     if ($namespaceStyle === 'psr0') {
+                        $outputPath .= "/{$this->namespace}";
 
-                        $outputPath .= "/{$namespace}";
-
-                        if ($structuredNamespace) {
-                            $outputPath .= '/' . static::DEFAULT_NAMESPACE_MESSAGE;
+                        if ($this->structuredNamespace) {
+                            $outputPath .= '/' . static::NAMESPACE_MESSAGE;
                         }
 
                         $fs->mkdir($outputPath);
@@ -253,10 +309,9 @@ class GenerateCommand extends Command
             $outputPath = "{$basePath}";
 
             if ($namespaceStyle === 'psr0') {
+                $outputPath .= "/{$this->namespace}";
 
-                $outputPath .= "/{$namespace}";
-
-                if ($structuredNamespace) {
+                if ($this->structuredNamespace) {
                     $outputPath .= '/';
                 }
 
@@ -271,7 +326,6 @@ class GenerateCommand extends Command
          */
 
         foreach ($wsdl->xpath('//wsdl:types//s:complexType') as $complexType) {
-
             $complexTypeName = (string) $complexType['name'];
 
             // if the complex type has been defined inside an element
@@ -280,7 +334,7 @@ class GenerateCommand extends Command
             }
 
             $complexTypeName = $this->validateType($complexTypeName);
-            $fqComplexTypeName = $namespace . '\\' . ($structuredNamespace ? static::DEFAULT_NAMESPACE_TYPE . '\\' : '') . $complexTypeName;
+            $fqComplexTypeName = $this->getMessagesClassName($complexTypeName);
             $extendedXmlType = $this->parseXmlType((string) current($complexType->xpath('.//s:extension/@base')));
             $extendedTypeName = $this->validateType($extendedXmlType->name);
 
@@ -291,7 +345,7 @@ class GenerateCommand extends Command
             if ($extendedXmlType->name) {
                 $complexTypeClass->setExtendedClass($extendedTypeName);
             }
-            $complexTypeClass->setNamespaceName($namespace . ($structuredNamespace ? '\\' . static::DEFAULT_NAMESPACE_TYPE : ''));
+            $complexTypeClass->setNamespaceName($this->getTypesNamespace());
 
             // create the constructor
             $constructor = new MethodGenerator('__construct');
@@ -300,13 +354,12 @@ class GenerateCommand extends Command
             $complexTypeClass->addMethodFromGenerator($constructor);
 
             foreach ($complexType->xpath('.//s:element') as $element) {
-
                 $elementName = (string) $element['name'];
 
                 $xmlType = $this->parseXmlType((string) $element['type']);
                 $elementType = $this->validateType($xmlType->name);
                 $typeIsPrimitive = $wsdlNamespaces[$xmlType->namespacePrefix] === static::NAMESPACE_XSD;
-                $fqElementType = ($typeIsPrimitive ? '' : ($namespace . '\\' . ($structuredNamespace ? static::DEFAULT_NAMESPACE_TYPE . '\\' : ''))) . $elementType;
+                $fqElementType = ($typeIsPrimitive ? '' : $this->getTypesNamespace() . '\\') . $elementType;
                 $fqDocBlockElementType = ($typeIsPrimitive ? '' : '\\') . $fqElementType;
                 $elementIsNullable = false;
                 $documentation = new Html2Text((string) current($element->xpath('.//wsdl:documentation')));
@@ -319,7 +372,11 @@ class GenerateCommand extends Command
                 // create the property
                 $property = new PropertyGenerator($elementName);
                 $property->setDocBlock($doc);
-                $property->setVisibility($accessors ? AbstractMemberGenerator::VISIBILITY_PROTECTED : AbstractMemberGenerator::VISIBILITY_PUBLIC);
+                $property->setVisibility(
+                    $accessors
+                    ? AbstractMemberGenerator::VISIBILITY_PROTECTED
+                    : AbstractMemberGenerator::VISIBILITY_PUBLIC
+                );
                 $complexTypeClass->addPropertyFromGenerator($property);
 
                 $paramTag = new ParamTag($elementName, $fqDocBlockElementType);
@@ -340,7 +397,6 @@ class GenerateCommand extends Command
 
                 // if the property accessors must be generated
                 if ($accessors) {
-
                     // create the setter
                     $accessorDocBlock = new DocBlockGenerator();
                     $accessorDocBlock->setTag($paramTag);
@@ -371,15 +427,14 @@ class GenerateCommand extends Command
             $outputPath = "{$basePath}";
 
             if ($namespaceStyle === 'psr0') {
+                $outputPath .= "/{$this->namespace}";
 
-                $outputPath .= "/{$namespace}";
-
-                if ($structuredNamespace) {
+                if ($this->structuredNamespace) {
                     $outputPath .= '/';
                 }
 
-                if ($structuredNamespace) {
-                    $outputPath .= '/' . static::DEFAULT_NAMESPACE_TYPE;
+                if ($this->structuredNamespace) {
+                    $outputPath .= '/' . static::NAMESPACE_TYPE;
                 }
 
                 $fs->mkdir($outputPath);
@@ -393,7 +448,6 @@ class GenerateCommand extends Command
          */
 
         foreach ($wsdl->xpath('//wsdl:types//s:simpleType') as $simpleType) {
-
             $simpleTypeName = (string) $simpleType['name'];
 
             // if the simple type has been defined inside an element
@@ -402,7 +456,7 @@ class GenerateCommand extends Command
             }
 
             $simpleTypeName = $this->validateType($simpleTypeName);
-            $fqSimpleTypeName = $namespace . '\\' . ($structuredNamespace ? static::DEFAULT_NAMESPACE_TYPE . '\\' : '') . $simpleTypeName;
+            $fqSimpleTypeName = $this->getTypesClassName($simpleTypeName);
             $extendedXmlType = $this->parseXmlType((string) current($simpleType->xpath('.//s:extension/@base')));
             $extendedTypeName = $this->validateType($extendedXmlType->name);
 
@@ -416,10 +470,9 @@ class GenerateCommand extends Command
                 // this class has no parent in the service, so make it extend \SplEnum
                 $simpleTypeClass->setExtendedClass('\SplEnum');
             }
-            $simpleTypeClass->setNamespaceName($namespace . ($structuredNamespace ? '\\' . static::DEFAULT_NAMESPACE_TYPE : ''));
+            $simpleTypeClass->setNamespaceName($this->getTypesNamespace());
 
             foreach ($simpleType->xpath('.//s:enumeration') as $enumeration) {
-
                 $enumerationValue = (string) $enumeration['value'];
 
                 // create the property
@@ -436,22 +489,20 @@ class GenerateCommand extends Command
             $outputPath = "{$basePath}";
 
             if ($namespaceStyle === 'psr0') {
+                $outputPath .= "/{$this->namespace}";
 
-                $outputPath .= "/{$namespace}";
-
-                if ($structuredNamespace) {
+                if ($this->structuredNamespace) {
                     $outputPath .= '/';
                 }
 
-                if ($structuredNamespace) {
-                    $outputPath .= '/' . static::DEFAULT_NAMESPACE_TYPE;
+                if ($this->structuredNamespace) {
+                    $outputPath .= '/' . static::NAMESPACE_TYPE;
                 }
 
                 $fs->mkdir($outputPath);
             }
 
             file_put_contents("{$outputPath}/{$simpleTypeName}.php", $file->generate());
-
         }
 
         // set the constructor body of the classmap class
@@ -462,10 +513,9 @@ class GenerateCommand extends Command
         $outputPath = "{$basePath}";
 
         if ($namespaceStyle === 'psr0') {
+            $outputPath .= "/{$this->namespace}";
 
-            $outputPath .= "/{$namespace}";
-
-            if ($structuredNamespace) {
+            if ($this->structuredNamespace) {
                 $outputPath .= '/';
             }
 
@@ -485,7 +535,7 @@ class GenerateCommand extends Command
 
         // register all the existing fixers
         $fixer->registerBuiltInFixers();
-        $config->fixers(array_filter($fixer->getFixers(), function(FixerInterface $fixer) {
+        $config->fixers(array_filter($fixer->getFixers(), function (FixerInterface $fixer) {
             return $fixer->getLevel() === FixerInterface::PSR2_LEVEL;
         }));
 
@@ -514,9 +564,47 @@ class GenerateCommand extends Command
         return sprintf("\$this['%s'] = '%s';", $soapType, $phpType) . AbstractGenerator::LINE_FEED;
     }
 
+    protected function getTypesNamespace()
+    {
+        return $this->getNamespace(static::NAMESPACE_TYPE);
+    }
+
+    protected function getMessagesNamespace()
+    {
+        return $this->getNamespace(static::NAMESPACE_MESSAGE);
+    }
+
+    protected function getNamespace($typeNamespace)
+    {
+        $fqns = '';
+
+        if ($this->namespace) {
+            $fqns .= $this->namespace;
+
+            if ($this->structuredNamespace) {
+                $fqns .= '\\' . $typeNamespace;
+            }
+        }
+
+        return $fqns;
+    }
+
+    protected function getTypesClassName($className)
+    {
+        $namespace = $this->getTypesNamespace();
+
+        return ($namespace ? $namespace . '\\' : '') . $className;
+    }
+
+    protected function getMessagesClassName($className)
+    {
+        $namespace = $this->getMessagesNamespace();
+
+        return ($namespace ? $namespace . '\\' : '') . $className;
+    }
+
     protected function isValidClassOrMethodName($string)
     {
-
     }
 
     /**
@@ -575,25 +663,11 @@ class GenerateCommand extends Command
         }
 
         if ($this->isToken($typeName)) {
-            $typeName .= self::NAME_SUFFIX;
+            $typeName .= static::NAME_SUFFIX;
         }
 
         return $typeName;
     }
-    /**
-     * The prefix to prepend to invalid names.
-     *
-     * @var string
-     */
-
-    const NAME_PREFIX = '_';
-
-    /**
-     * The suffix to append to invalid names.
-     *
-     * @var string
-     */
-    const NAME_SUFFIX = '_';
 
     /**
      * Validates a name against standard PHP naming conventions
@@ -605,96 +679,9 @@ class GenerateCommand extends Command
     {
         // Prepend the string a to names that begin with anything but a-z This is to make a valid name
         if (preg_match('/^[A-Za-z_]/', $name) == false) {
-            $name = self::NAME_PREFIX . ucfirst($name);
+            $name = ucfirst($name) . static::NAME_SUFFIX;
         }
 
         return preg_replace('/[^a-zA-Z0-9_x7f-xff]*/', '', preg_replace('/^[^a-zA-Z_x7f-xff]*/', '', $name));
     }
-
-//    /**
-//     * Checks if a string is a restricted keyword.
-//     *
-//     * @param string $string the string to check..
-//     * @return boolean Whether the string is a restricted keyword.
-//     */
-//    private static function isKeyword($string)
-//    {
-//        return in_array(strtolower($string), self::$keywords);
-//    }
-//
-//    /**
-//     * Array containing all PHP keywords.
-//     *
-//     * @var array
-//     * @link http://www.php.net/manual/en/reserved.keywords.php
-//     */
-//    private static $keywords = array(
-//        '__halt_compiler',
-//        'abstract',
-//        'and',
-//        'array',
-//        'as',
-//        'break',
-//        'callable',
-//        'case',
-//        'catch',
-//        'class',
-//        'clone',
-//        'const',
-//        'continue',
-//        'declare',
-//        'default',
-//        'die',
-//        'do',
-//        'echo',
-//        'else',
-//        'elseif',
-//        'empty',
-//        'enddeclare',
-//        'endfor',
-//        'endforeach',
-//        'endif',
-//        'endswitch',
-//        'endwhile',
-//        'eval',
-//        'exit',
-//        'extends',
-//        'final',
-//        'finally',
-//        'for',
-//        'foreach',
-//        'function',
-//        'global',
-//        'goto',
-//        'if',
-//        'implements',
-//        'include',
-//        'include_once',
-//        'instanceof',
-//        'insteadof',
-//        'interface',
-//        'isset',
-//        'list',
-//        'namespace',
-//        'new',
-//        'or',
-//        'print',
-//        'private',
-//        'protected',
-//        'public',
-//        'require',
-//        'require_once',
-//        'return',
-//        'static',
-//        'switch',
-//        'throw',
-//        'trait',
-//        'try',
-//        'unset',
-//        'use',
-//        'var',
-//        'while',
-//        'xor',
-//        'yield'
-//    );
-} 
+}
