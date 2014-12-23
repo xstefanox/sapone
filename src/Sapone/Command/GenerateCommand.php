@@ -104,6 +104,12 @@ class GenerateCommand extends Command
                 InputOption::VALUE_REQUIRED,
                 'The style of the namespace [psr0|psr4]',
                 'psr4'
+            )
+            ->addOption(
+                'logging',
+                null,
+                InputOption::VALUE_NONE,
+                'Add support for a PSR-3 logger'
             );
     }
 
@@ -125,6 +131,7 @@ class GenerateCommand extends Command
         $constructorNull = $input->getOption('constructor-null');
         $accessors = $input->getOption('accessors');
         $splEnums = $input->getOption('spl-enums');
+        $logging = $input->getOption('logging');
 
         /*
          * OUTPUT PREPARATION
@@ -167,6 +174,10 @@ class GenerateCommand extends Command
             $documentation = new Html2Text((string) current($port->xpath('./wsdl:documentation')));
             if ($documentation->getText()) {
                 $serviceClass->setDocBlock(new DocBlockGenerator($documentation->getText()));
+            }
+
+            if ($logging) {
+                $serviceClass->getMethod('__construct');
             }
 
             // create the service methods
