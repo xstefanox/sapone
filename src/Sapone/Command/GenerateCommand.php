@@ -26,6 +26,7 @@ use Zend\Code\Generator\ParameterGenerator;
 use Zend\Code\Generator\PropertyGenerator;
 use Zend\Code\Generator\ValueGenerator;
 use Zend\Code\Reflection\ClassReflection;
+use Sapone\Xml\SimpleXMLElement;
 
 class GenerateCommand extends Command
 {
@@ -44,6 +45,7 @@ class GenerateCommand extends Command
 
     const NAMESPACE_MESSAGE = 'Message';
     const NAMESPACE_TYPE = 'Type';
+    const NAMESPACE_ENUM = 'Enum';
 
     /**
      * The suffix to append to invalid names.
@@ -54,13 +56,14 @@ class GenerateCommand extends Command
 
     protected $namespace;
     protected $structuredNamespace;
+    protected $importedSchemas = array();
     
     protected function configure()
     {
         $this
             ->setName('generate')
             ->addArgument(
-                'input',
+                'wsdl-path',
                 InputArgument::REQUIRED,
                 'The path to the wsdl'
             )
@@ -110,15 +113,47 @@ class GenerateCommand extends Command
                 null,
                 InputOption::VALUE_NONE,
                 'Add support for a PSR-3 logger'
+            )
+            ->addOption(
+                'proxy',
+                null,
+                InputOption::VALUE_REQUIRED,
+                'The URL of the proxy used to connect to the wsdl file'
             );
     }
 
+    /**
+     * Recursively load the XML Schemas included in the given document, adding them to the imported schemas registry.
+     * 
+     * @param type $document
+     */
+    protected function loadSchemas($document)
+    {
+        // find each import node
+        foreach ($document->xpath('//xsd:import') as $importedSchema) {
+            
+            // read the schema namespace and location
+            $namespace = (string) $importedSchema['namespace'];
+            $location = (string) $importedSchema['schemaLocation'];
+            
+            // if the current schema has not been loaded yet
+            if (!array_key_exists($namespace, $this->importedSchemas)) {
+                
+                // load the schema
+                $this->importedSchemas[$namespace] = SimpleXMLElement::loadFile($location);
+                
+                // load its imported schemas
+                $this->loadSchemas($this->importedSchemas[$namespace]);
+            }
+        }
+    }
+    
     protected function execute(InputInterface $input, OutputInterface $output)
     {
         /*
          * INPUT VALIDATION
          */
-        $wsdlPath = $input->getArgument('input');
+        $wsdlPath = $input->getArgument('wsdl-path');
         $basePath = $input->getArgument('output');
 
         $this->namespace = $input->getArgument('namespace');
@@ -132,6 +167,37 @@ class GenerateCommand extends Command
         $accessors = $input->getOption('accessors');
         $splEnums = $input->getOption('spl-enums');
         $logging = $input->getOption('logging');
+        $proxy = $input->getOption('proxy');
+
+        if ($proxy) {
+            if (filter_var($proxy, FILTER_VALIDATE_URL) === false) {
+                throw new \InvalidArgumentException("Proxy must be a valid URL");
+            }
+        }
+
+        $parsedWsdlPath = parse_url($wsdlPath);
+
+        // if not fetching the wsdl file from filesystem and a proxy has been set
+        if (array_key_exists('scheme', $parsedWsdlPath) and $parsedWsdlPath['scheme'] !== 'file' and $proxy) {
+
+            $parsedProxy = parse_url($proxy);
+            $proxyScheme = $parsedProxy['scheme'];
+            $parsedProxy['scheme'] = 'tcp';
+
+            // @todo: replace URL cretaion with league/url
+            $proxy = $parsedProxy['scheme'] . '://' . $parsedProxy['host'] . ':' . $parsedProxy['port'];
+
+            libxml_set_streams_context(
+                stream_context_get_default(
+                    array(
+                        $proxyScheme => array(
+                            'proxy' => $proxy,
+                            'request_fulluri' => true,
+                        )
+                    )
+                )
+            );
+        }
 
         /*
          * OUTPUT PREPARATION
@@ -142,11 +208,11 @@ class GenerateCommand extends Command
         /*
          * LOAD THE WSDL DOCUMENT
          */
-        $wsdl = simplexml_load_file($wsdlPath);
-        $wsdl->registerXPathNamespace('s', static::NAMESPACE_XSD);
-        $wsdl->registerXPathNamespace('wsdl', static::NAMESPACE_WSDL);
+        $wsdl = SimpleXMLElement::loadFile($wsdlPath, 'Sapone\Util\SimpleXMLElement');
         $wsdlNamespaces = $wsdl->getDocNamespaces();
-
+        
+        $this->loadSchemas($wsdl);
+        
         /*
          * GENERATE THE CLASSMAPPING CLASS
          */
@@ -157,7 +223,7 @@ class GenerateCommand extends Command
         $classmapClass->setNamespaceName($this->namespace);
         $classmapClass->setImplementedInterfaces(array('\ArrayAccess'));
         $classmapConstructorBody = '';
-
+        
         /*
          * GENERATE THE SERVICES CLASSES
          */
@@ -191,8 +257,8 @@ class GenerateCommand extends Command
                 $documentation = new Html2Text((string) current($operation->xpath('.//wsdl:documentation')));
 
                 // read the name and type of the messages
-                $fqInputMessageType = $this->getMessagesClassName($inputMessageType);
-                $fqOutputMessageType = $this->getMessagesClassName($outputMessageType);
+                $fqInputMessageType = $this->getMessageClassName($inputMessageType);
+                $fqOutputMessageType = $this->getMessageClassName($outputMessageType);
 
                 if ($this->structuredNamespace) {
                     $serviceClass->addUse($fqInputMessageType);
@@ -220,7 +286,7 @@ class GenerateCommand extends Command
                 foreach ($wsdl->xpath('//wsdl:message') as $message) {
                     $messageName = $this->validateType((string) $message['name']);
                     $messageNameNamespace = $this->getMessagesNamespace();
-                    $fqMessageName = $this->getMessagesClassName($messageName);
+                    $fqMessageName = $this->getMessageClassName($messageName);
 
                     // create the class
                     $messageClass = new ClassGenerator();
@@ -233,6 +299,7 @@ class GenerateCommand extends Command
                     }
 
                     foreach ($message->xpath('.//wsdl:part') as $part) {
+                        
                         $partName = (string) $part['name'];
 
                         if ($part['type']) {
@@ -243,11 +310,26 @@ class GenerateCommand extends Command
                             $element = current(
                                 $wsdl->xpath(
                                     sprintf(
-                                        '//wsdl:types//s:element[@name="%s"]',
+                                        '//wsdl:types//xsd:element[@name="%s"]',
                                         $this->parseXmlType((string) $part['element'])->name
                                     )
                                 )
                             );
+
+                            // if not found, try to search in the imported XSD documents
+                            if ($element === false) {
+                                
+                                $importedWsdl = $this->importedSchemas[$wsdlNamespaces[$this->parseXmlType((string) $part['element'])->namespacePrefix]];
+
+                                $element = current(
+                                    $importedWsdl->xpath(
+                                        sprintf(
+                                            '//xsd:element[@name="%s"]',
+                                            $this->parseXmlType((string) $part['element'])->name
+                                        )
+                                    )
+                                );
+                            }
 
                             // if the element references a type
                             if ($element['type']) {
@@ -258,7 +340,7 @@ class GenerateCommand extends Command
                             }
 
                             // if the element uses the current target namespace
-                            $tnsXPath = '//wsdl:types//s:element[@name="%s"]/' .
+                            $tnsXPath = '//wsdl:types//xsd:element[@name="%s"]/' .
                                         'ancestor::*[@targetNamespace]/@targetNamespace';
                             if ($xmlType->namespacePrefix === null) {
                                 $xmlType->namespacePrefix = array_search(
@@ -336,17 +418,17 @@ class GenerateCommand extends Command
          * GENERATE THE TYPE CLASSES
          */
 
-        foreach ($wsdl->xpath('//wsdl:types//s:complexType') as $complexType) {
+        foreach ($wsdl->xpath('//wsdl:types//xsd:complexType') as $complexType) {
             $complexTypeName = (string) $complexType['name'];
-
+echo $complexTypeName . PHP_EOL;
             // if the complex type has been defined inside an element
             if (empty($complexTypeName)) {
                 $complexTypeName = (string) current($complexType->xpath('./ancestor::*[@name]/@name'));
             }
 
             $complexTypeName = $this->validateType($complexTypeName);
-            $fqComplexTypeName = $this->getMessagesClassName($complexTypeName);
-            $extendedXmlType = $this->parseXmlType((string) current($complexType->xpath('.//s:extension/@base')));
+            $fqComplexTypeName = $this->getMessageClassName($complexTypeName);
+            $extendedXmlType = $this->parseXmlType((string) current($complexType->xpath('.//xsd:extension/@base')));
             $extendedTypeName = $this->validateType($extendedXmlType->name);
 
             // create the class
@@ -364,7 +446,7 @@ class GenerateCommand extends Command
             $constructorBody = '';
             $complexTypeClass->addMethodFromGenerator($constructor);
 
-            foreach ($complexType->xpath('.//s:element') as $element) {
+            foreach ($complexType->xpath('.//xsd:element') as $element) {
                 $elementName = (string) $element['name'];
 
                 $xmlType = $this->parseXmlType((string) $element['type']);
@@ -453,12 +535,20 @@ class GenerateCommand extends Command
 
             file_put_contents("{$outputPath}/{$complexTypeName}.php", $file->generate());
         }
-
+        
         /*
          * GENERATE THE ENUM CLASSES
          */
-
-        foreach ($wsdl->xpath('//wsdl:types//s:simpleType') as $simpleType) {
+        
+        $simpleTypeNodes = $wsdl->getSimpleTypes();
+        
+        foreach (array_map(function($wsdl) {
+                return $wsdl->getSimpleTypes();
+            }, $this->importedSchemas) as $types) {
+            $simpleTypeNodes = array_merge($simpleTypeNodes, $types);
+        }
+        
+        foreach ($simpleTypeNodes as $simpleType) {
             $simpleTypeName = (string) $simpleType['name'];
 
             // if the simple type has been defined inside an element
@@ -467,8 +557,8 @@ class GenerateCommand extends Command
             }
 
             $simpleTypeName = $this->validateType($simpleTypeName);
-            $fqSimpleTypeName = $this->getTypesClassName($simpleTypeName);
-            $extendedXmlType = $this->parseXmlType((string) current($simpleType->xpath('.//s:extension/@base')));
+            $fqSimpleTypeName = $this->getEnumClassName($simpleTypeName);
+            $extendedXmlType = $this->parseXmlType((string) current($simpleType->xpath('.//xsd:extension/@base')));
             $extendedTypeName = $this->validateType($extendedXmlType->name);
 
             // create the class
@@ -481,13 +571,13 @@ class GenerateCommand extends Command
                 // this class has no parent in the service, so make it extend \SplEnum
                 $simpleTypeClass->setExtendedClass('\SplEnum');
             }
-            $simpleTypeClass->setNamespaceName($this->getTypesNamespace());
+            $simpleTypeClass->setNamespaceName($this->getEnumsNamespace());
 
-            foreach ($simpleType->xpath('.//s:enumeration') as $enumeration) {
+            foreach ($simpleType->xpath('.//xsd:enumeration') as $enumeration) {
                 $enumerationValue = (string) $enumeration['value'];
 
                 // create the property
-                $property = new PropertyGenerator($this->validateType($enumerationValue), $enumerationValue);
+                $property = new PropertyGenerator($enumerationValue, $enumerationValue);
                 $property->setConst(true);
                 $simpleTypeClass->addPropertyFromGenerator($property);
             }
@@ -507,7 +597,7 @@ class GenerateCommand extends Command
                 }
 
                 if ($this->structuredNamespace) {
-                    $outputPath .= '/' . static::NAMESPACE_TYPE;
+                    $outputPath .= '/' . static::NAMESPACE_ENUM;
                 }
 
                 $fs->mkdir($outputPath);
@@ -538,7 +628,7 @@ class GenerateCommand extends Command
         /*
          * GENERATED CODE FIX
          */
-
+/*
         // create the coding standards fixer
         $fixer = new Fixer();
         $config = new FixerConfig();
@@ -552,6 +642,7 @@ class GenerateCommand extends Command
 
         // fix the generated code
         $fixer->fix($config);
+ */
     }
 
     protected function parseXmlType($type)
@@ -575,16 +666,6 @@ class GenerateCommand extends Command
         return sprintf("\$this['%s'] = '%s';", $soapType, $phpType) . AbstractGenerator::LINE_FEED;
     }
 
-    protected function getTypesNamespace()
-    {
-        return $this->getNamespace(static::NAMESPACE_TYPE);
-    }
-
-    protected function getMessagesNamespace()
-    {
-        return $this->getNamespace(static::NAMESPACE_MESSAGE);
-    }
-
     protected function getNamespace($typeNamespace)
     {
         $fqns = '';
@@ -600,22 +681,40 @@ class GenerateCommand extends Command
         return $fqns;
     }
 
-    protected function getTypesClassName($className)
+    protected function getTypesNamespace()
+    {
+        return $this->getNamespace(static::NAMESPACE_TYPE);
+    }
+
+    protected function getEnumsNamespace()
+    {
+        return $this->getNamespace(static::NAMESPACE_ENUM);
+    }
+    
+    protected function getMessagesNamespace()
+    {
+        return $this->getNamespace(static::NAMESPACE_MESSAGE);
+    }
+
+    protected function getTypeClassName($className)
     {
         $namespace = $this->getTypesNamespace();
 
         return ($namespace ? $namespace . '\\' : '') . $className;
     }
 
-    protected function getMessagesClassName($className)
+    protected function getEnumClassName($className)
+    {
+        $namespace = $this->getEnumsNamespace();
+
+        return ($namespace ? $namespace . '\\' : '') . $className;
+    }
+    
+    protected function getMessageClassName($className)
     {
         $namespace = $this->getMessagesNamespace();
 
         return ($namespace ? $namespace . '\\' : '') . $className;
-    }
-
-    protected function isValidClassOrMethodName($string)
-    {
     }
 
     /**
@@ -627,6 +726,7 @@ class GenerateCommand extends Command
      */
     public function validateType($typeName)
     {
+        // if the given type is an array
         if (substr($typeName, -2) == "[]") {
             return $typeName;
         }
@@ -634,6 +734,7 @@ class GenerateCommand extends Command
             return substr($typeName, 7) . '[]';
         }
 
+        // convert the XSD type to the corresponding PHP type
         switch (strtolower($typeName)) {
             case "int":
             case "integer":
@@ -669,7 +770,9 @@ class GenerateCommand extends Command
                 return 'mixed';
                 break;
             default:
-                $typeName = self::validateNamingConvention($typeName);
+                if ($this->isToken($typeName)) {
+                    $typeName .= static::NAME_SUFFIX;
+                }
                 break;
         }
 
@@ -688,7 +791,7 @@ class GenerateCommand extends Command
      */
     private static function validateNamingConvention($name)
     {
-        // Prepend the string a to names that begin with anything but a-z This is to make a valid name
+        // Prepend the string a to name that begins with anything but a-z This is to make a valid name
         if (preg_match('/^[A-Za-z_]/', $name) == false) {
             $name = ucfirst($name) . static::NAME_SUFFIX;
         }
