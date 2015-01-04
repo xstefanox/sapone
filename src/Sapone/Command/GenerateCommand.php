@@ -2,7 +2,13 @@
 
 namespace Sapone\Command;
 
+use Goetas\XML\XSDReader\Schema\Schema;
+use Goetas\XML\XSDReader\Schema\Type\SimpleType;
+use Goetas\XML\XSDReader\Schema\Type\Type;
 use Html2Text\Html2Text;
+use League\Url\Url;
+use Sapone\Config;
+use Sapone\Generator;
 use Sapone\Wsdl\XmlType;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -19,6 +25,7 @@ use Zend\Code\Generator\ClassGenerator;
 use Zend\Code\Generator\DocBlock\Tag\GenericTag;
 use Zend\Code\Generator\DocBlock\Tag\ParamTag;
 use Zend\Code\Generator\DocBlock\Tag\ReturnTag;
+use Zend\Code\Generator\DocBlock\TagManager;
 use Zend\Code\Generator\DocBlockGenerator;
 use Zend\Code\Generator\FileGenerator;
 use Zend\Code\Generator\MethodGenerator;
@@ -27,6 +34,8 @@ use Zend\Code\Generator\PropertyGenerator;
 use Zend\Code\Generator\ValueGenerator;
 use Zend\Code\Reflection\ClassReflection;
 use Sapone\Xml\SimpleXMLElement;
+use Goetas\XML\XSDReader\SchemaReader;
+use Goetas\XML\WSDLReader\DefinitionsReader;
 
 class GenerateCommand extends Command
 {
@@ -56,8 +65,10 @@ class GenerateCommand extends Command
 
     protected $namespace;
     protected $structuredNamespace;
+    protected $namespaceStyle;
     protected $importedSchemas = array();
-    
+    protected $axisNamespaces = true;
+
     protected function configure()
     {
         $this
@@ -68,26 +79,28 @@ class GenerateCommand extends Command
                 'The path to the wsdl'
             )
             ->addArgument(
-                'output',
+                'output-path',
                 InputArgument::REQUIRED,
                 'The path to the generated code'
             )
-            ->addArgument(
+            ->addOption(
                 'namespace',
-                InputArgument::REQUIRED,
+                null,
+                InputOption::VALUE_REQUIRED,
                 'The namespace of the generated code'
             )
             ->addOption(
-                'accessors',
+                'axis-namespaces',
                 null,
                 InputOption::VALUE_NONE,
-                'Enable the generation of setters/getters'
+                'Put the generated classes into Apache Axis style namespaces, derived from the XMLSchema namespaces'
             )
             ->addOption(
-                'constructor-null',
+                'autoloader',
                 null,
-                InputOption::VALUE_NONE,
-                'Default every constructor parameter to null'
+                InputOption::VALUE_REQUIRED,
+                'The style of generated autoloader [psr0|psr4]',
+                'psr4'
             )
             ->addOption(
                 'spl-enums',
@@ -96,134 +109,289 @@ class GenerateCommand extends Command
                 'Make the enum classes extend SPL enums'
             )
             ->addOption(
-                'structured-namespace',
+                'accessors',
                 null,
                 InputOption::VALUE_NONE,
-                'Put messages and types in a sub-namespace'
+                'Enable the generation of setters/getters'
             )
+
+
             ->addOption(
-                'namespace-style',
+                'constructor-null',
                 null,
-                InputOption::VALUE_REQUIRED,
-                'The style of the namespace [psr0|psr4]',
-                'psr4'
+                InputOption::VALUE_NONE,
+                'Default every constructor parameter to null'
             )
+//            ->addOption(
+//                'structured-namespace',
+//                null,
+//                InputOption::VALUE_NONE,
+//                'Put messages and types in a sub-namespace'
+//            )
             ->addOption(
                 'logging',
                 null,
                 InputOption::VALUE_NONE,
                 'Add support for a PSR-3 logger'
-            )
-            ->addOption(
-                'proxy',
-                null,
-                InputOption::VALUE_REQUIRED,
-                'The URL of the proxy used to connect to the wsdl file'
             );
+//            ->addOption(
+//                'proxy',
+//                null,
+//                InputOption::VALUE_REQUIRED,
+//                'The URL of the proxy used to connect to the wsdl file'
+//            );
     }
 
+//    /**
+//     * Recursively load the XML Schemas included in the given document, adding them to the imported schemas registry.
+//     *
+//     * @param \SimpleXmlElement $document
+//     */
+//    protected function loadSchemas($document)
+//    {
+//        // find each import node
+//        foreach ($document->xpath('//xsd:import') as $importedSchema) {
+//
+//            // read the schema namespace and location
+//            $namespace = (string) $importedSchema['namespace'];
+//            $location = (string) $importedSchema['schemaLocation'];
+//
+//            // if the current schema has not been loaded yet
+//            if (!array_key_exists($namespace, $this->importedSchemas)) {
+//
+//                // load the schema
+//                $this->importedSchemas[$namespace] = SimpleXMLElement::loadFile($location);
+//
+//                // load its imported schemas
+//                $this->loadSchemas($this->importedSchemas[$namespace]);
+//            }
+//        }
+//    }
+
     /**
-     * Recursively load the XML Schemas included in the given document, adding them to the imported schemas registry.
-     * 
-     * @param type $document
+     * Sanitize the given string to make it usable as a PHP entity (const name, etc.)
+     * @param $string
+     * @return string
      */
-    protected function loadSchemas($document)
+    protected function sanitizeString($string)
     {
-        // find each import node
-        foreach ($document->xpath('//xsd:import') as $importedSchema) {
-            
-            // read the schema namespace and location
-            $namespace = (string) $importedSchema['namespace'];
-            $location = (string) $importedSchema['schemaLocation'];
-            
-            // if the current schema has not been loaded yet
-            if (!array_key_exists($namespace, $this->importedSchemas)) {
-                
-                // load the schema
-                $this->importedSchemas[$namespace] = SimpleXMLElement::loadFile($location);
-                
-                // load its imported schemas
-                $this->loadSchemas($this->importedSchemas[$namespace]);
-            }
+        if ($this->isReservedWord($string)) {
+            $string .= static::NAME_SUFFIX;
         }
+
+        return $string;
     }
-    
+
+//    protected function createEnum(SimpleType $type)
+//    {
+//        $parentType = $type->getParent()->getBase();
+//        $targetNamespace = $type->getSchema()->getTargetNamespace();
+//        $phpNamespace = array();
+//
+//        if ($this->axisNamespaces) {
+//
+//            // prepend the base namespace
+//            if ($this->namespace) {
+//                $phpNamespace[] = $this->namespace;
+//            }
+//
+//            // append the XMLSchema namespace, formatted in Apache Axis style
+//            $url = Url::createFromUrl($targetNamespace);
+//
+//            // the namespace is an url
+//            $phpNamespace = array_merge($phpNamespace, array_reverse(explode('.', $url->getHost()->get())));
+//
+//            if (!empty($url->getPath()->get())) {
+//                $phpNamespace = array_merge($phpNamespace, explode('/', $url->getPath()->get()));
+//            }
+//        }
+//
+//        $phpNamespace = implode('\\', $phpNamespace);
+//
+//        // create the class
+//        $simpleTypeClass = new ClassGenerator();
+//        $simpleTypeClass->setName($type->getName());
+//        $simpleTypeClass->setNamespaceName($phpNamespace);
+//
+//        // set the parent class
+//        if ($parentType->getSchema()->getTargetNamespace() !== SchemaReader::XSD_NS) {
+//            // this enum extends another, it will indirectly extend \SplEnum
+//            $simpleTypeClass->setExtendedClass($parentType->getName());
+//        } elseif ($this->splEnums) {
+//            // this enum has no parent, so make it extend \SplEnum
+//            $simpleTypeClass->setExtendedClass('\SplEnum');
+//        }
+//
+//        // set the class documentation
+//        $classDocs = new DocBlockGenerator($type->getDoc());
+//        $classDocs->setTag(new GenericTag('xmlns', $targetNamespace));
+//        $simpleTypeClass->setDocBlock($classDocs);
+//
+//        // create the class constants
+//        $checks = $type->getRestriction()->getChecks();
+//
+//        foreach ($checks['enumeration'] as $enum) {
+//
+//            $property = new PropertyGenerator(filter_var($enum['value'], FILTER_CALLBACK, array('options' => array($this, 'sanitizeString'))), $enum['value']);
+//            $property->setConst(true);
+//
+//            if ($enum['doc']) {
+//                $property->setDocBlock(new DocBlockGenerator($enum['doc']));
+//            }
+//
+//            $simpleTypeClass->addPropertyFromGenerator($property);
+//        }
+//
+//        // serialize the class
+//        $this->serializeClass($simpleTypeClass, static::NAMESPACE_ENUM, $type);
+//    }
+
     protected function execute(InputInterface $input, OutputInterface $output)
     {
+        $config = new Config();
+
+        $config->setWsdlDocumentPath($input->getArgument('wsdl-path'));
+        $config->setOutputPath($input->getArgument('output-path'));
+
+        if ($input->getOption('namespace')) {
+            $config->setNamespace($input->getOption('namespace'));
+        }
+
+        if ($input->getOption('axis-namespaces')) {
+            $config->setAxisNamespaces($input->getOption('axis-namespaces'));
+        }
+
+        if ($input->getOption('autoloader')) {
+            $config->setAutoloader($input->getOption('autoloader'));
+        }
+
+        if ($input->getOption('spl-enums')) {
+            $config->setSplEnums(true);
+        }
+
+        if ($input->getOption('accessors')) {
+            $config->setAccessors(true);
+        }
+
+        $generator = new Generator($config);
+        $generator->generate();
+
+        return;
+
         /*
          * INPUT VALIDATION
          */
         $wsdlPath = $input->getArgument('wsdl-path');
-        $basePath = $input->getArgument('output');
+        $this->basePath = $input->getArgument('output-path');
 
         $this->namespace = $input->getArgument('namespace');
         $this->structuredNamespace = $input->getOption('structured-namespace');
-        $namespaceStyle = $input->getOption('namespace-style');
-        if (!in_array(strtolower($namespaceStyle), array('psr0', 'psr4'))) {
-            throw new \InvalidArgumentException("Invalid namespace style: '{$namespaceStyle}'");
+        $this->namespaceStyle = $input->getOption('namespace-style');
+        if (!in_array(strtolower($this->namespaceStyle), array('psr0', 'psr4'))) {
+            throw new \InvalidArgumentException("Invalid namespace style: '{$this->namespaceStyle}'");
         }
 
         $constructorNull = $input->getOption('constructor-null');
         $accessors = $input->getOption('accessors');
-        $splEnums = $input->getOption('spl-enums');
+        $this->splEnums = $input->getOption('spl-enums');
         $logging = $input->getOption('logging');
         $proxy = $input->getOption('proxy');
 
-        if ($proxy) {
-            if (filter_var($proxy, FILTER_VALIDATE_URL) === false) {
-                throw new \InvalidArgumentException("Proxy must be a valid URL");
+//        if ($proxy) {
+//            if (filter_var($proxy, FILTER_VALIDATE_URL) === false) {
+//                throw new \InvalidArgumentException("Proxy must be a valid URL");
+//            }
+//        }
+//
+//        $parsedWsdlPath = parse_url($wsdlPath);
+//
+//        // if not fetching the wsdl file from filesystem and a proxy has been set
+//        if (array_key_exists('scheme', $parsedWsdlPath) and $parsedWsdlPath['scheme'] !== 'file' and $proxy) {
+//
+//            $parsedProxy = parse_url($proxy);
+//            $proxyScheme = $parsedProxy['scheme'];
+//            $parsedProxy['scheme'] = 'tcp';
+//
+//            // @todo: replace URL cretaion with league/url
+//            $proxy = $parsedProxy['scheme'] . '://' . $parsedProxy['host'] . ':' . $parsedProxy['port'];
+//
+//            libxml_set_streams_context(
+//                stream_context_get_default(
+//                    array(
+//                        $proxyScheme => array(
+//                            'proxy' => $proxy,
+//                            'request_fulluri' => true,
+//                        )
+//                    )
+//                )
+//            );
+//        }
+
+//        /*
+//         * LOAD THE WSDL DOCUMENT
+//         */
+//        $wsdl = SimpleXMLElement::loadFile($wsdlPath);
+//        $wsdl->registerXPathNamespace('wsdl', GenerateCommand::NAMESPACE_WSDL);
+//        $schemaReader = new SchemaReader();
+//
+//        /* @var \Goetas\XML\XSDReader\Schema\Schema[] $schemas */
+//        $schemas = array();
+//
+//        /* @var \Goetas\XML\XSDReader\Schema\Type\Type[] $types */
+//        $types = array();
+//
+//        // read the schemas included in the wsdl document
+//        foreach ($wsdl->xpath('/wsdl:definitions/wsdl:types/xsd:schema') as $schemaNode) {
+//            $schemas[] = $schemaReader->readNode(dom_import_simplexml($schemaNode));
+//        }
+//
+//        $unusedSchemaTemplates = array(
+//            SchemaReader::XML_NS,
+//            SchemaReader::XSD_NS,
+//        );
+//
+//        // recursively read all the schema chain
+//        $processedSchemas = array();
+//
+//        while (!empty($schemas)) {
+//
+//            /* @var \Goetas\XML\XSDReader\Schema\Schema $currentSchema */
+//            $currentSchema = array_shift($schemas);
+//
+//            if (!in_array($currentSchema, $processedSchemas) and !in_array($currentSchema->getTargetNamespace(), $unusedSchemaTemplates)) {
+//                $processedSchemas[] = $currentSchema;
+//                $schemas = array_merge($schemas, $currentSchema->getSchemas());
+//            }
+//        }
+//
+//        $schemas = $processedSchemas;
+//        unset($processedSchemas);
+//        unset($unusedSchemaTemplates);
+
+//        // get the complete list of defined types
+//        foreach ($schemas as $schema) {
+//            $types = array_merge($types, $schema->getTypes());
+//        }
+
+        foreach ($types as $type) {
+
+            if ($type instanceof SimpleType) {
+                $this->createEnum($type);
             }
         }
 
-        $parsedWsdlPath = parse_url($wsdlPath);
 
-        // if not fetching the wsdl file from filesystem and a proxy has been set
-        if (array_key_exists('scheme', $parsedWsdlPath) and $parsedWsdlPath['scheme'] !== 'file' and $proxy) {
-
-            $parsedProxy = parse_url($proxy);
-            $proxyScheme = $parsedProxy['scheme'];
-            $parsedProxy['scheme'] = 'tcp';
-
-            // @todo: replace URL cretaion with league/url
-            $proxy = $parsedProxy['scheme'] . '://' . $parsedProxy['host'] . ':' . $parsedProxy['port'];
-
-            libxml_set_streams_context(
-                stream_context_get_default(
-                    array(
-                        $proxyScheme => array(
-                            'proxy' => $proxy,
-                            'request_fulluri' => true,
-                        )
-                    )
-                )
-            );
-        }
-
-        /*
-         * OUTPUT PREPARATION
-         */
-        $fs = new Filesystem();
-        $fs->mkdir($basePath);
-
-        /*
-         * LOAD THE WSDL DOCUMENT
-         */
-        $wsdl = SimpleXMLElement::loadFile($wsdlPath, 'Sapone\Util\SimpleXMLElement');
-        $wsdlNamespaces = $wsdl->getDocNamespaces();
-        
-        $this->loadSchemas($wsdl);
-        
         /*
          * GENERATE THE CLASSMAPPING CLASS
          */
 
-        $classmapClassName = 'Classmap';
-        $classmapClass = ClassGenerator::fromReflection(new ClassReflection('\Sapone\Template\ClassmapTemplate'));
-        $classmapClass->setName($classmapClassName);
-        $classmapClass->setNamespaceName($this->namespace);
-        $classmapClass->setImplementedInterfaces(array('\ArrayAccess'));
-        $classmapConstructorBody = '';
-        
+//        $classmapClassName = 'Classmap';
+//        $classmapClass = ClassGenerator::fromReflection(new ClassReflection('\Sapone\Template\ClassmapTemplate'));
+//        $classmapClass->setName($classmapClassName);
+//        $classmapClass->setNamespaceName($this->namespace);
+//        $classmapClass->setImplementedInterfaces(array('\ArrayAccess'));
+//        $classmapConstructorBody = '';
+
         /*
          * GENERATE THE SERVICES CLASSES
          */
@@ -283,8 +451,9 @@ class GenerateCommand extends Command
                 /*
                  * GENERATE THE MESSAGES CLASSES
                  */
-                foreach ($wsdl->xpath('//wsdl:message') as $message) {
+                foreach ($wsdl->xpath("//wsdl:message[@name='{$inputMessageType}']|//wsdl:message[@name='{$outputMessageType}']") as $message) {
                     $messageName = $this->validateType((string) $message['name']);
+
                     $messageNameNamespace = $this->getMessagesNamespace();
                     $fqMessageName = $this->getMessageClassName($messageName);
 
@@ -299,7 +468,7 @@ class GenerateCommand extends Command
                     }
 
                     foreach ($message->xpath('.//wsdl:part') as $part) {
-                        
+
                         $partName = (string) $part['name'];
 
                         if ($part['type']) {
@@ -318,7 +487,7 @@ class GenerateCommand extends Command
 
                             // if not found, try to search in the imported XSD documents
                             if ($element === false) {
-                                
+
                                 $importedWsdl = $this->importedSchemas[$wsdlNamespaces[$this->parseXmlType((string) $part['element'])->namespacePrefix]];
 
                                 $element = current(
@@ -377,50 +546,32 @@ class GenerateCommand extends Command
                     // add the class to the classmap
                     $classmapConstructorBody .= $this->generateClassmapEntry($messageName, $fqMessageName);
 
-                    // serialize the class
-                    $file = new FileGenerator(array('class' => $messageClass));
-                    $outputPath = "{$basePath}";
-
-                    if ($namespaceStyle === 'psr0') {
-                        $outputPath .= "/{$this->namespace}";
-
-                        if ($this->structuredNamespace) {
-                            $outputPath .= '/' . static::NAMESPACE_MESSAGE;
-                        }
-
-                        $fs->mkdir($outputPath);
-                    }
-
-                    file_put_contents("{$outputPath}/{$messageName}.php", $file->generate());
+                    $this->serializeMessage($messageClass);
                 }
             }
 
             // there is no need to add the service class to the classmap
 
             // serialize the class
-            $file = new FileGenerator(array('class' => $serviceClass));
-            $outputPath = "{$basePath}";
-
-            if ($namespaceStyle === 'psr0') {
-                $outputPath .= "/{$this->namespace}";
-
-                if ($this->structuredNamespace) {
-                    $outputPath .= '/';
-                }
-
-                $fs->mkdir($outputPath);
-            }
-
-            file_put_contents("{$outputPath}/{$serviceClassName}.php", $file->generate());
+            $this->serializeService($serviceClass);
         }
 
         /*
          * GENERATE THE TYPE CLASSES
          */
 
-        foreach ($wsdl->xpath('//wsdl:types//xsd:complexType') as $complexType) {
+        /*
+        $complexTypeNodes = $wsdl->getComplexTypes();
+
+        foreach (array_map(function($wsdl) {
+                return $wsdl->getComplexTypes();
+            }, $this->importedSchemas) as $types) {
+            $complexTypeNodes = array_merge($complexTypeNodes, $types);
+        }
+
+        foreach ($complexTypeNodes as $complexType) {
             $complexTypeName = (string) $complexType['name'];
-echo $complexTypeName . PHP_EOL;
+
             // if the complex type has been defined inside an element
             if (empty($complexTypeName)) {
                 $complexTypeName = (string) current($complexType->xpath('./ancestor::*[@name]/@name'));
@@ -446,11 +597,19 @@ echo $complexTypeName . PHP_EOL;
             $constructorBody = '';
             $complexTypeClass->addMethodFromGenerator($constructor);
 
+            $wsdlNamespaces = $complexType->getDocNamespaces();
+//            var_dump($wsdlNamespaces);
             foreach ($complexType->xpath('.//xsd:element') as $element) {
                 $elementName = (string) $element['name'];
 
                 $xmlType = $this->parseXmlType((string) $element['type']);
                 $elementType = $this->validateType($xmlType->name);
+//                var_dump($xmlType);
+//                var_dump($element->getNamespaces());
+                if ($xmlType->namespacePrefix == null) {
+                    echo $elementName . PHP_EOL;
+                    echo (string) $element['type'] . PHP_EOL;
+                }
                 $typeIsPrimitive = $wsdlNamespaces[$xmlType->namespacePrefix] === static::NAMESPACE_XSD;
                 $fqElementType = ($typeIsPrimitive ? '' : $this->getTypesNamespace() . '\\') . $elementType;
                 $fqDocBlockElementType = ($typeIsPrimitive ? '' : '\\') . $fqElementType;
@@ -516,38 +675,23 @@ echo $complexTypeName . PHP_EOL;
             $classmapConstructorBody .= $this->generateClassmapEntry($complexTypeName, $fqComplexTypeName);
 
             // serialize the class
-            $file = new FileGenerator(array('class' => $complexTypeClass));
-            $outputPath = "{$basePath}";
-
-            if ($namespaceStyle === 'psr0') {
-                $outputPath .= "/{$this->namespace}";
-
-                if ($this->structuredNamespace) {
-                    $outputPath .= '/';
-                }
-
-                if ($this->structuredNamespace) {
-                    $outputPath .= '/' . static::NAMESPACE_TYPE;
-                }
-
-                $fs->mkdir($outputPath);
-            }
-
-            file_put_contents("{$outputPath}/{$complexTypeName}.php", $file->generate());
+            $this->serializeType($complexTypeClass);
         }
-        
+        */
+
         /*
          * GENERATE THE ENUM CLASSES
          */
-        
+
+        /*
         $simpleTypeNodes = $wsdl->getSimpleTypes();
-        
+
         foreach (array_map(function($wsdl) {
                 return $wsdl->getSimpleTypes();
             }, $this->importedSchemas) as $types) {
             $simpleTypeNodes = array_merge($simpleTypeNodes, $types);
         }
-        
+
         foreach ($simpleTypeNodes as $simpleType) {
             $simpleTypeName = (string) $simpleType['name'];
 
@@ -565,10 +709,10 @@ echo $complexTypeName . PHP_EOL;
             $simpleTypeClass = new ClassGenerator();
             $simpleTypeClass->setName($simpleTypeName);
             if ($extendedXmlType->name) {
-                // this type extends another, it will indirectly extend \SplEnum
+                // this enum extends another, it will indirectly extend \SplEnum
                 $simpleTypeClass->setExtendedClass($extendedTypeName);
-            } elseif ($splEnums) {
-                // this class has no parent in the service, so make it extend \SplEnum
+            } elseif ($this->splEnums) {
+                // this enum has no parent, so make it extend \SplEnum
                 $simpleTypeClass->setExtendedClass('\SplEnum');
             }
             $simpleTypeClass->setNamespaceName($this->getEnumsNamespace());
@@ -586,63 +730,33 @@ echo $complexTypeName . PHP_EOL;
             $classmapConstructorBody .= $this->generateClassmapEntry($simpleTypeName, $fqSimpleTypeName);
 
             // serialize the class
-            $file = new FileGenerator(array('class' => $simpleTypeClass));
-            $outputPath = "{$basePath}";
-
-            if ($namespaceStyle === 'psr0') {
-                $outputPath .= "/{$this->namespace}";
-
-                if ($this->structuredNamespace) {
-                    $outputPath .= '/';
-                }
-
-                if ($this->structuredNamespace) {
-                    $outputPath .= '/' . static::NAMESPACE_ENUM;
-                }
-
-                $fs->mkdir($outputPath);
-            }
-
-            file_put_contents("{$outputPath}/{$simpleTypeName}.php", $file->generate());
+            $this->serializeEnum($simpleTypeClass);
         }
 
         // set the constructor body of the classmap class
         $classmapClass->getMethod('__construct')->setBody($classmapConstructorBody);
 
         // serialize the classmapping class
-        $file = new FileGenerator(array('class' => $classmapClass));
-        $outputPath = "{$basePath}";
-
-        if ($namespaceStyle === 'psr0') {
-            $outputPath .= "/{$this->namespace}";
-
-            if ($this->structuredNamespace) {
-                $outputPath .= '/';
-            }
-
-            $fs->mkdir($outputPath);
-        }
-
-        file_put_contents("{$outputPath}/{$classmapClassName}.php", $file->generate());
+        $this->serializeClassmap($classmapClass);
+        */
 
         /*
          * GENERATED CODE FIX
          */
-/*
-        // create the coding standards fixer
-        $fixer = new Fixer();
-        $config = new FixerConfig();
-        $config->setDir($outputPath);
 
-        // register all the existing fixers
-        $fixer->registerBuiltInFixers();
-        $config->fixers(array_filter($fixer->getFixers(), function (FixerInterface $fixer) {
-            return $fixer->getLevel() === FixerInterface::PSR2_LEVEL;
-        }));
-
-        // fix the generated code
-        $fixer->fix($config);
- */
+//        // create the coding standards fixer
+//        $fixer = new Fixer();
+//        $config = new FixerConfig();
+//        $config->setDir($this->basePath);
+//
+//        // register all the existing fixers
+//        $fixer->registerBuiltInFixers();
+//        $config->fixers(array_filter($fixer->getFixers(), function (FixerInterface $fixer) {
+//            return $fixer->getLevel() === FixerInterface::PSR2_LEVEL;
+//        }));
+//
+//        // fix the generated code
+//        $fixer->fix($config);
     }
 
     protected function parseXmlType($type)
@@ -655,7 +769,13 @@ echo $complexTypeName . PHP_EOL;
         );
     }
 
-    protected function isToken($string)
+    /**
+     * Check if the given string is a PHP reserved word
+     *
+     * @param $string
+     * @return bool
+     */
+    protected function isReservedWord($string)
     {
         $tokens = token_get_all("<?php {$string} ?>");
         return $tokens[1][0] !== T_STRING;
@@ -717,6 +837,105 @@ echo $complexTypeName . PHP_EOL;
         return ($namespace ? $namespace . '\\' : '') . $className;
     }
 
+    protected function serializeClass(ClassGenerator $class, $subNamespace = null, Type $type = null)
+    {
+        $className = $class->getName();
+        $fs = new Filesystem();
+
+        $file = new FileGenerator(array('class' => $class));
+        $outputPath = "{$this->basePath}";
+
+        if ($this->namespaceStyle === 'psr0') {
+            $outputPath .= '/' . str_ireplace('\\', '/', $class->getNamespaceName());
+        }
+
+        $fs->mkdir($outputPath);
+
+        file_put_contents("{$outputPath}/{$className}.php", $file->generate());
+    }
+    
+//    protected function serializeEnum(ClassGenerator $class)
+//    {
+//        $this->serializeClass($class, static::NAMESPACE_ENUM);
+//    }
+    
+    protected function serializeType(ClassGenerator $class)
+    {
+        $this->serializeClass($class, static::NAMESPACE_TYPE);
+    }
+    
+    protected function serializeMessage(ClassGenerator $class)
+    {
+        $this->serializeClass($class, static::NAMESPACE_MESSAGE);
+    }
+    
+    protected function serializeService(ClassGenerator $class)
+    {
+        $this->serializeClass($class);
+    }
+    
+    protected function serializeClassmap(ClassGenerator $class)
+    {
+        $this->serializeClass($class);
+    }
+
+    protected function convertXsdTypeToPhpType($typeName)
+    {
+        $isArray = false;
+        $pregResult = preg_match("/^(ArrayOf(?<t1>\w+)|(?<t2>\w+)\[\])$/i", $typeName, $matches);
+
+        if ($pregResult === false) {
+            throw new \Exception(preg_last_error());
+        }
+
+        // if the given type is an array
+        if ($pregResult) {
+            $isArray = true;
+            $typeName = $matches['t1'] ? $matches['t1'] : $matches['t2'];
+        }
+
+        switch (strtolower($typeName)) {
+            case "int":
+            case "integer":
+            case "long":
+            case "byte":
+            case "short":
+            case "negativeinteger":
+            case "nonnegativeinteger":
+            case "nonpositiveinteger":
+            case "positiveinteger":
+            case "unsignedbyte":
+            case "unsignedint":
+            case "unsignedlong":
+            case "unsignedshort":
+                $phpType = 'int';
+                break;
+            case "float":
+            case "double":
+            case "decimal":
+                $phpType = 'float';
+                break;
+            case "<anyxml>":
+            case "string":
+            case "token":
+            case "normalizedstring":
+            case "hexbinary":
+                $phpType = 'string';
+                break;
+            case "datetime":
+                $phpType =  '\DateTime';
+                break;
+            case 'anytype':
+                $phpType = 'mixed';
+                break;
+            default:
+                $phpType = $typeName;
+                break;
+        }
+
+        return $phpType . '[]';
+    }
+
     /**
      * Validates a wsdl type against known PHP primitive types, or otherwise
      * validates the namespace of the type to PHP naming conventions
@@ -770,13 +989,13 @@ echo $complexTypeName . PHP_EOL;
                 return 'mixed';
                 break;
             default:
-                if ($this->isToken($typeName)) {
+                if ($this->isReservedWord($typeName)) {
                     $typeName .= static::NAME_SUFFIX;
                 }
                 break;
         }
 
-        if ($this->isToken($typeName)) {
+        if ($this->isReservedWord($typeName)) {
             $typeName .= static::NAME_SUFFIX;
         }
 

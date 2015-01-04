@@ -1,14 +1,18 @@
 <?php
 
-namespace Sapone\Xml;
+namespace Sapone\Util;
 
 use Sapone\Command\GenerateCommand;
 
+/**
+ * A SimpleXMLElement that automatically loads the XMLSchema and WSDL namespaces for XPath queries
+ */
 class SimpleXMLElement extends \SimpleXMLElement
 {
     public static function loadFile($path)
     {
-        $xml = simplexml_load_file($path, 'Sapone\Xml\SimpleXMLElement');
+        /* @var \Sapone\Util\SimpleXMLElement $xml */
+        $xml = simplexml_load_file($path, 'Sapone\Util\SimpleXMLElement');
         $xml->registerBaseXPathNamespaces();
         
         return $xml;
@@ -24,17 +28,16 @@ class SimpleXMLElement extends \SimpleXMLElement
     {
         $elements = parent::xpath($path);
 
+        // in case of a successful query, ensure that the loaded elements register the needed namespaces
         if (is_array($elements)) {
+
+            /* @var \Sapone\Util\SimpleXMLElement[] $elements */
+
             foreach ($elements as $element) {
                 $element->registerBaseXPathNamespaces();
             }
         }
 
         return $elements;
-    }
-    
-    public function getSimpleTypes()
-    {
-        return $this->xpath('//wsdl:types//xsd:simpleType|//xsd:schema//xsd:simpleType');
     }
 }
