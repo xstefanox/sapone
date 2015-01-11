@@ -9,6 +9,10 @@ use Sapone\Command\GenerateCommand;
  */
 class SimpleXMLElement extends \SimpleXMLElement
 {
+    /**
+     * @param string $path The path to the XML document
+     * @return SimpleXMLElement
+     */
     public static function loadFile($path)
     {
         /* @var \Sapone\Util\SimpleXMLElement $xml */
@@ -17,13 +21,31 @@ class SimpleXMLElement extends \SimpleXMLElement
         
         return $xml;
     }
-    
+
+    public static function parseQualifiedXmlType($name)
+    {
+        preg_match('/^((?<prefix>\w+):)?(?<name>.*$)/', $name, $matches);
+
+        $parsedTypeName = array(
+            'prefix' => (array_key_exists('prefix', $matches) and !empty($matches['prefix'])) ? $matches['prefix'] : '',
+            'name' => (array_key_exists('name', $matches) and !empty($matches['name'])) ? $matches['name'] : null,
+        );
+
+        return $parsedTypeName;
+    }
+
+    /**
+     * Register the commonly used XMLSchema namespaces and prefixes used in XPath queries
+     */
     protected function registerBaseXPathNamespaces()
     {
         $this->registerXPathNamespace('xsd', GenerateCommand::NAMESPACE_XSD);
         $this->registerXPathNamespace('wsdl', GenerateCommand::NAMESPACE_WSDL);
     }
-    
+
+    /**
+     * @inheritdoc
+     */
     public function xpath($path)
     {
         $elements = parent::xpath($path);
@@ -39,5 +61,14 @@ class SimpleXMLElement extends \SimpleXMLElement
         }
 
         return $elements;
+    }
+
+    public function getNamespace()
+    {
+        $parsedTypeName = static::parseQualifiedXmlType($this->getName());
+
+        $namespaces = $this->getNamespaces();
+
+        return $namespaces[$parsedTypeName['prefix']];
     }
 }

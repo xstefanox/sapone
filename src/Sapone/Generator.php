@@ -9,6 +9,7 @@ use League\Url\Url;
 use Sapone\Builder\ClassBuilder;
 use Sapone\Builder\EnumBuilder;
 use Sapone\Builder\ServiceBuilder;
+use Sapone\Factory\ClassFactory;
 use Sapone\Util\SimpleXMLElement;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\CS\Fixer;
@@ -83,6 +84,12 @@ class Generator
         $wsdlDocument->registerXPathNamespace('wsdl', static::WSDL_NS);
         $schemaReader = new SchemaReader();
 
+
+//        var_dump($wsdlDocument->xpath("//xsd:simpleType[@name='deliveryStatus2']/in-scope-prefixes::*"));
+
+//        var_dump($wsdlDocument->xpath("namespace-uri(.)"));
+//        var_dump(dom_import_simplexml($wsdlDocument)->lookupNamespaceUri(null));
+
         /* @var \Goetas\XML\XSDReader\Schema\Schema[] $schemas */
         $schemas = array();
 
@@ -146,11 +153,8 @@ class Generator
          * CODE GENERATION
          */
 
-        $enumBuilder = new EnumBuilder($this->config);
-        $classBuilder = new ClassBuilder($this->config);
-        $serviceBuilder = new ServiceBuilder($this->config);
+        $classFactory = new ClassFactory($this->config, $schemas, $types);
 
-        // generate the enum type classes
         foreach ($types as $type) {
 
             if ($type instanceof SimpleType) {
@@ -178,12 +182,16 @@ class Generator
 
                 // enums are built only of string enumerations
                 if (end($inheritanceChain)->getBase()->getName() === 'string' and array_key_exists('enumeration', $type->getRestriction()->getChecks())) {
-                    $enumBuilder->buildClass($type);
+                    $classFactory->createEnum($type);
                 }
 
             } elseif ($type instanceof ComplexType) {
-                $classBuilder->buildClass($type);
+                $classFactory->createDTO($type);
             }
+        }
+
+        foreach ($services as $service) {
+            $classFactory->createService($service);
         }
 
         /*

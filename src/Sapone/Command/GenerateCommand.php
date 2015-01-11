@@ -33,9 +33,6 @@ use Zend\Code\Generator\ParameterGenerator;
 use Zend\Code\Generator\PropertyGenerator;
 use Zend\Code\Generator\ValueGenerator;
 use Zend\Code\Reflection\ClassReflection;
-use Sapone\Xml\SimpleXMLElement;
-use Goetas\XML\XSDReader\SchemaReader;
-use Goetas\XML\WSDLReader\DefinitionsReader;
 
 class GenerateCommand extends Command
 {
@@ -114,14 +111,17 @@ class GenerateCommand extends Command
                 InputOption::VALUE_NONE,
                 'Enable the generation of setters/getters'
             )
-
-
             ->addOption(
-                'constructor-null',
+                'null-constructor-arguments',
                 null,
                 InputOption::VALUE_NONE,
-                'Default every constructor parameter to null'
+                'Default every constructor argument to null'
             )
+
+
+
+
+
 //            ->addOption(
 //                'structured-namespace',
 //                null,
@@ -273,8 +273,24 @@ class GenerateCommand extends Command
             $config->setAccessors(true);
         }
 
+        if ($input->getOption('null-constructor-arguments')) {
+            $config->setNullConstructorArguments(true);
+        }
+
         $generator = new Generator($config);
         $generator->generate();
+
+
+
+
+
+
+
+
+
+
+
+
 
         return;
 
@@ -405,14 +421,15 @@ class GenerateCommand extends Command
             $serviceClass->setExtendedClass('\SoapClient');
             $serviceClass->setNamespaceName($this->namespace);
 
+            // read the service documentation
             $documentation = new Html2Text((string) current($port->xpath('./wsdl:documentation')));
             if ($documentation->getText()) {
                 $serviceClass->setDocBlock(new DocBlockGenerator($documentation->getText()));
             }
 
-            if ($logging) {
-                $serviceClass->getMethod('__construct');
-            }
+//            if ($logging) {
+//                $serviceClass->getMethod('__construct');
+//            }
 
             // create the service methods
             foreach ($port->xpath('.//wsdl:operation') as $operation) {

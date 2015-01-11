@@ -43,6 +43,11 @@ class Config
      */
     protected $accessors;
 
+    /**
+     * @var bool
+     */
+    protected $nullConstructorArguments;
+
     public function __construct()
     {
         // set default values
@@ -166,5 +171,21 @@ class Config
     public function setAccessors($accessors)
     {
         $this->accessors = $accessors;
+    }
+
+    /**
+     * @return boolean
+     */
+    public function isNullConstructorArguments()
+    {
+        return $this->nullConstructorArguments;
+    }
+
+    /**
+     * @param boolean $nullConstructorArguments
+     */
+    public function setNullConstructorArguments($nullConstructorArguments)
+    {
+        $this->nullConstructorArguments = $nullConstructorArguments;
     }
 }

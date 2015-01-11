@@ -22,44 +22,84 @@ class NamespaceInflector
     /**
      * Determine the namespace of a type from the XMLSchema
      *
-     * @param Type $type
+     * @param \Goetas\XML\XSDReader\Schema\Type\Type|\Sapone\Util\SimpleXMLElement $type
      * @return string
      */
-    public function inflectNamespace(Type $type)
+    public function inflectNamespace($type)
     {
+        if ($type instanceof Type) {
 
-        if ($type->getSchema()->getTargetNamespace() == SchemaReader::XSD_NS) {
+            if ($type->getSchema()->getTargetNamespace() === SchemaReader::XSD_NS) {
 
-            // XMLSchema primitive types do not have a namespace
-            $namespace = null;
+                // XMLSchema primitive types do not have a namespace
+                $namespace = null;
+
+            } else {
+
+                $namespace = array();
+
+                // prepend the base namespace
+                if ($this->config->getNamespace()) {
+                    $namespace[] = $this->config->getNamespace();
+                }
+
+                if ($this->config->isAxisNamespaces()) {
+
+                    // append the XMLSchema namespace, formatted in Apache Axis style
+                    $url = Url::createFromUrl($type->getSchema()->getTargetNamespace());
+
+                    // the namespace is an url
+                    $namespace = array_merge($namespace, array_reverse(explode('.', $url->getHost()->get())));
+
+                    if (!empty($url->getPath()->get())) {
+                        $namespace = array_merge($namespace, explode('/', $url->getPath()->get()));
+                    }
+                }
+
+                $namespace = implode('\\', $namespace);
+
+            }
+
+            return $namespace;
+
+        } elseif ($type instanceof SimpleXMLElement) {
+
+            if ($type->getNamespace() === SchemaReader::XSD_NS) {
+
+                // XMLSchema primitive types do not have a namespace
+                $namespace = null;
+
+            } else {
+
+                $namespace = array();
+
+                // prepend the base namespace
+                if ($this->config->getNamespace()) {
+                    $namespace[] = $this->config->getNamespace();
+                }
+
+                if ($this->config->isAxisNamespaces()) {
+
+                    // append the XMLSchema namespace, formatted in Apache Axis style
+                    $url = Url::createFromUrl($type->getNamespace());
+
+                    // the namespace is an url
+                    $namespace = array_merge($namespace, array_reverse(explode('.', $url->getHost()->get())));
+
+                    if (!empty($url->getPath()->get())) {
+                        $namespace = array_merge($namespace, explode('/', $url->getPath()->get()));
+                    }
+                }
+
+                $namespace = implode('\\', $namespace);
+
+            }
+
+            return $namespace;
 
         } else {
-
-            $namespace = array();
-
-            // prepend the base namespace
-            if ($this->config->getNamespace()) {
-                $namespace[] = $this->config->getNamespace();
-            }
-
-            if ($this->config->isAxisNamespaces()) {
-
-                // append the XMLSchema namespace, formatted in Apache Axis style
-                $url = Url::createFromUrl($type->getSchema()->getTargetNamespace());
-
-                // the namespace is an url
-                $namespace = array_merge($namespace, array_reverse(explode('.', $url->getHost()->get())));
-
-                if (!empty($url->getPath()->get())) {
-                    $namespace = array_merge($namespace, explode('/', $url->getPath()->get()));
-                }
-            }
-
-            $namespace = implode('\\', $namespace);
-
+            throw new \InvalidArgumentException('Expected an instance of Goetas\XML\XSDReader\Schema\Type\Type or Sapone\Util\SimpleXMLElement');
         }
-
-        return $namespace;
     }
 
     public function inflectQualifiedName(Type $type)
