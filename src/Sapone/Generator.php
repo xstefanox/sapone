@@ -84,12 +84,6 @@ class Generator
         $wsdlDocument->registerXPathNamespace('wsdl', static::WSDL_NS);
         $schemaReader = new SchemaReader();
 
-
-//        var_dump($wsdlDocument->xpath("//xsd:simpleType[@name='deliveryStatus2']/in-scope-prefixes::*"));
-
-//        var_dump($wsdlDocument->xpath("namespace-uri(.)"));
-//        var_dump(dom_import_simplexml($wsdlDocument)->lookupNamespaceUri(null));
-
         /* @var \Goetas\XML\XSDReader\Schema\Schema[] $schemas */
         $schemas = array();
 
@@ -193,6 +187,8 @@ class Generator
         foreach ($services as $service) {
             $classFactory->createService($service);
         }
+
+        $classFactory->createClassmap();
 
         /*
          * GENERATED CODE FIX

@@ -54,6 +54,11 @@ class ClassFactory implements ClassFactoryInterface
     protected $types;
 
     /**
+     * @var string[]
+     */
+    protected $classmap;
+
+    /**
      * @param \Sapone\Config $config
      * @param \Goetas\XML\XSDReader\Schema\Schema[] $schemas
      * @param \Goetas\XML\XSDReader\Schema\Type\Type[] $types
@@ -64,6 +69,7 @@ class ClassFactory implements ClassFactoryInterface
         $this->schemas = $schemas;
         $this->types = $types;
         $this->namespaceInflector = new NamespaceInflector($config);
+        $this->classmap = array();
     }
 
     protected function createClassFromType(Type $type)
@@ -146,6 +152,9 @@ class ClassFactory implements ClassFactoryInterface
         }
 
         $this->serializeClass($class);
+
+        // register the class in the classmap
+        $this->classmap[$class->getName()] = $class->getNamespaceName() . '\\' . $class->getName();
     }
 
     public function createDTO(Type $type)
@@ -259,6 +268,9 @@ class ClassFactory implements ClassFactoryInterface
         $constructor->setBody($constructorBody);
 
         $this->serializeClass($class);
+
+        // register the class in the classmap
+        $this->classmap[$class->getName()] = $class->getNamespaceName() . '\\' . $class->getName();
     }
 
     public function createService(SimpleXMLElement $service)
@@ -276,14 +288,24 @@ class ClassFactory implements ClassFactoryInterface
         // create the class
         $serviceClass = ClassGenerator::fromReflection(new ClassReflection('\Sapone\Template\ServiceTemplate'));
         $serviceClass->setName($serviceClassName);
-        $serviceClass->setExtendedClass('\SoapClient');
         $serviceClass->setNamespaceName($this->namespaceInflector->inflectNamespace($service));
 
+        // set the correct inheritance
+        if ($this->config->isBesimpleClient()) {
+            $serviceClass->setExtendedClass('BeSimpleSoapClient');
+            $serviceClass->addUse('BeSimple\SoapClient\SoapClient');
+        } else {
+            $serviceClass->setExtendedClass('\SoapClient');
+        }
+
         // read the service documentation
+        $serviceDoc = new DocBlockGenerator();
+        $serviceDoc->setTag(new GenericTag('xmlns', '@todo'));
         $documentation = new Html2Text((string) current($service->xpath('./wsdl:documentation')));
         if ($documentation->getText()) {
-            $serviceClass->setDocBlock(new DocBlockGenerator($documentation->getText()));
+            $serviceDoc->setShortDescription($documentation->getText());
         }
+        $serviceClass->setDocBlock($serviceDoc);
 
         /*
          * METHODS CREATION
@@ -317,6 +339,49 @@ class ClassFactory implements ClassFactoryInterface
         }
 
         $this->serializeClass($serviceClass);
+
+        // register the class in the classmap
+        $this->classmap[$serviceClass->getName()] = $serviceClass->getNamespaceName() . '\\' . $serviceClass->getName();
+    }
+
+    public function createClassmap()
+    {
+        /*
+         * INI FILE GENERATION
+         */
+
+        $outputPath = array($this->config->getOutputPath());
+
+        // if the psr0 autoloader has been selected, transform the class namespace into a filesystem path
+        if ($this->config->getAutoloader() === Config::AUTOLOADER_PSR0) {
+            $outputPath[] = str_ireplace('\\', DIRECTORY_SEPARATOR, $this->config->getNamespace());
+        }
+
+        // append the file name
+        $outputPath[] = 'classmap.ini';
+
+        // finalize the output path
+        $outputPath = implode(DIRECTORY_SEPARATOR, $outputPath);
+
+        // remove the file if exists
+        $fs = new Filesystem();
+        $fs->remove($outputPath);
+
+        foreach ($this->classmap as $wsdlType => $phpType) {
+            file_put_contents($outputPath, "$wsdlType  =  $phpType" . AbstractGenerator::LINE_FEED, FILE_APPEND);
+        }
+
+        /*
+         * CLASS GENERATION
+         */
+
+        // create the class
+        $classmapClass = ClassGenerator::fromReflection(new ClassReflection('\Sapone\Template\ClassmapTemplate'));
+        $classmapClass->setName('Classmap');
+        $classmapClass->setExtendedClass('\ArrayObject');
+        $classmapClass->setNamespaceName($this->config->getNamespace());
+
+        $this->serializeClass($classmapClass);
     }
 
     /**

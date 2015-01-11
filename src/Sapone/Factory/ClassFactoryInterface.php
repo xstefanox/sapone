@@ -12,4 +12,6 @@ interface ClassFactoryInterface
     public function createDTO(Type $type);
 
     public function createService(SimpleXMLElement $wsdl);
+
+    public function createClassmap();
 }

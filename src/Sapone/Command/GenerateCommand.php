@@ -117,6 +117,12 @@ class GenerateCommand extends Command
                 InputOption::VALUE_NONE,
                 'Default every constructor argument to null'
             )
+            ->addOption(
+                'besimple-client',
+                null,
+                InputOption::VALUE_NONE,
+                'Extend BeSimpleSoapClient'
+            )
 
 
 

@@ -46,6 +46,11 @@ class Config
     /**
      * @var bool
      */
+    protected $besimpleClient;
+
+    /**
+     * @var bool
+     */
     protected $nullConstructorArguments;
 
     public function __construct()
@@ -187,5 +192,21 @@ class Config
     public function setNullConstructorArguments($nullConstructorArguments)
     {
         $this->nullConstructorArguments = $nullConstructorArguments;
+    }
+
+    /**
+     * @return boolean
+     */
+    public function isBesimpleClient()
+    {
+        return $this->besimpleClient;
+    }
+
+    /**
+     * @param boolean $besimpleClient
+     */
+    public function setBesimpleClient($besimpleClient)
+    {
+        $this->besimpleClient = $besimpleClient;
     }
 }
