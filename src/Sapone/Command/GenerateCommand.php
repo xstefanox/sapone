@@ -3,6 +3,7 @@
 namespace Sapone\Command;
 
 use Sapone\Config;
+use Sapone\Event;
 use Sapone\Generator;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -109,6 +110,23 @@ class GenerateCommand extends Command
         }
 
         $generator = new Generator($config);
+
+        $generator->getEventDispatcher()->addListener(Event::ENUM_CREATE, function (Event $event) use ($output) {
+            $output->writeln('<info> * </info>Enum class created: ' . $event->getClassName());
+        });
+
+        $generator->getEventDispatcher()->addListener(Event::DTO_CREATE, function (Event $event) use ($output) {
+            $output->writeln('<info> * </info>Data Transfer Object class created: ' . $event->getClassName());
+        });
+
+        $generator->getEventDispatcher()->addListener(Event::SERVICE_CREATE, function (Event $event) use ($output) {
+            $output->writeln('<info> * </info>Service class created: ' . $event->getClassName());
+        });
+
+        $generator->getEventDispatcher()->addListener(Event::CLASSMAP_CREATE, function (Event $event) use ($output) {
+            $output->writeln('<info> * </info>Classmap class created: ' . $event->getClassName());
+        });
+
         $generator->generate();
     }
 

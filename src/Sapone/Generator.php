@@ -47,6 +47,14 @@ class Generator
     }
 
     /**
+     * @return \Symfony\Component\EventDispatcher\EventDispatcher
+     */
+    public function getEventDispatcher()
+    {
+        return $this->eventDispatcher;
+    }
+
+    /**
      * Execute the code generation
      */
     public function generate()
@@ -185,18 +193,22 @@ class Generator
                     and
                     array_key_exists('enumeration', $type->getRestriction()->getChecks())
                 ) {
-                    $classFactory->createEnum($type);
+                    $className = $classFactory->createEnum($type);
+                    $this->eventDispatcher->dispatch(Event::ENUM_CREATE, new Event($className));
                 }
             } elseif ($type instanceof ComplexType) {
-                $classFactory->createDTO($type);
+                $className = $classFactory->createDTO($type);
+                $this->eventDispatcher->dispatch(Event::DTO_CREATE, new Event($className));
             }
         }
 
         foreach ($services as $service) {
-            $classFactory->createService($service);
+            $className = $classFactory->createService($service);
+            $this->eventDispatcher->dispatch(Event::SERVICE_CREATE, new Event($className));
         }
 
-        $classFactory->createClassmap();
+        $className = $classFactory->createClassmap();
+        $this->eventDispatcher->dispatch(Event::CLASSMAP_CREATE, new Event($className));
 
         /*
          * GENERATED CODE FIX

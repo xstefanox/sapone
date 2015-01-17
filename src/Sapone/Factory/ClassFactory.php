@@ -183,6 +183,8 @@ class ClassFactory implements ClassFactoryInterface
 
         // register the class in the classmap
         $this->classmap[$class->getName()] = $class->getNamespaceName() . '\\' . $class->getName();
+
+        return $class->getName();
     }
 
     /**
@@ -305,6 +307,8 @@ class ClassFactory implements ClassFactoryInterface
 
         // register the class in the classmap
         $this->classmap[$class->getName()] = $class->getNamespaceName() . '\\' . $class->getName();
+
+        return $class->getName();
     }
 
     /**
@@ -331,16 +335,16 @@ class ClassFactory implements ClassFactoryInterface
          */
 
         // create the class
-        $serviceClass = ClassGenerator::fromReflection(new ClassReflection('\Sapone\Template\ServiceTemplate'));
-        $serviceClass->setName($serviceClassName);
-        $serviceClass->setNamespaceName($this->namespaceInflector->inflectNamespace($service));
+        $class = ClassGenerator::fromReflection(new ClassReflection('\Sapone\Template\ServiceTemplate'));
+        $class->setName($serviceClassName);
+        $class->setNamespaceName($this->namespaceInflector->inflectNamespace($service));
 
         // set the correct inheritance
         if ($this->config->isBesimpleClient()) {
-            $serviceClass->setExtendedClass('BeSimpleSoapClient');
-            $serviceClass->addUse('BeSimple\SoapClient\SoapClient');
+            $class->setExtendedClass('BeSimpleSoapClient');
+            $class->addUse('BeSimple\SoapClient\SoapClient');
         } else {
-            $serviceClass->setExtendedClass('\SoapClient');
+            $class->setExtendedClass('\SoapClient');
         }
 
         // read the service documentation
@@ -350,7 +354,7 @@ class ClassFactory implements ClassFactoryInterface
         if ($documentation->getText()) {
             $serviceDoc->setShortDescription($documentation->getText());
         }
-        $serviceClass->setDocBlock($serviceDoc);
+        $class->setDocBlock($serviceDoc);
 
         /*
          * METHODS CREATION
@@ -400,13 +404,15 @@ class ClassFactory implements ClassFactoryInterface
             $method->setDocBlock($messageDoc);
             $method->setParameter($param);
             $method->setBody("return \$this->__soapCall('{$operation['name']}', array(\$parameters));");
-            $serviceClass->addMethodFromGenerator($method);
+            $class->addMethodFromGenerator($method);
         }
 
-        $this->serializeClass($serviceClass);
+        $this->serializeClass($class);
 
         // register the class in the classmap
-        $this->classmap[$serviceClass->getName()] = $serviceClass->getNamespaceName() . '\\' . $serviceClass->getName();
+        $this->classmap[$class->getName()] = $class->getNamespaceName() . '\\' . $class->getName();
+
+        return $class->getName();
     }
 
     /**
@@ -444,12 +450,14 @@ class ClassFactory implements ClassFactoryInterface
          */
 
         // create the class
-        $classmapClass = ClassGenerator::fromReflection(new ClassReflection('\Sapone\Template\ClassmapTemplate'));
-        $classmapClass->setName('Classmap');
-        $classmapClass->setExtendedClass('\ArrayObject');
-        $classmapClass->setNamespaceName($this->config->getNamespace());
+        $class = ClassGenerator::fromReflection(new ClassReflection('\Sapone\Template\ClassmapTemplate'));
+        $class->setName('Classmap');
+        $class->setExtendedClass('\ArrayObject');
+        $class->setNamespaceName($this->config->getNamespace());
 
-        $this->serializeClass($classmapClass);
+        $this->serializeClass($class);
+
+        return $class->getName();
     }
 
     /**
