@@ -224,7 +224,10 @@ class ClassFactory implements ClassFactoryInterface
             $elementName = $element->getName();
 
             // create a param and a param tag used in constructor and setter docs
-            $param = new ParameterGenerator($elementName, $element->getType());
+            $param = new ParameterGenerator(
+                $elementName,
+                $this->namespaceInflector->inflectQualifiedName($element->getType())
+            );
             $paramTag = new ParamTag($elementName, $docElementType);
 
             // set the parameter nullability
@@ -442,7 +445,7 @@ class ClassFactory implements ClassFactoryInterface
         $fs->remove($outputPath);
 
         foreach ($this->classmap as $wsdlType => $phpType) {
-            file_put_contents($outputPath, "$wsdlType  =  $phpType" . AbstractGenerator::LINE_FEED, FILE_APPEND);
+            file_put_contents($outputPath, "{$wsdlType} = {$phpType}" . AbstractGenerator::LINE_FEED, FILE_APPEND);
         }
 
         /*
@@ -454,6 +457,10 @@ class ClassFactory implements ClassFactoryInterface
         $class->setName('Classmap');
         $class->setExtendedClass('\ArrayObject');
         $class->setNamespaceName($this->config->getNamespace());
+
+        $doc = new DocBlockGenerator();
+        $doc->setTag(new GenericTag('@service', $this->config->getWsdlDocumentPath()));
+        $class->setDocBlock($doc);
 
         $this->serializeClass($class);
 

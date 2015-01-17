@@ -104,8 +104,19 @@ class NamespaceInflector
      */
     public function inflectQualifiedName(Type $type)
     {
-        $namespace = $this->inflectNamespace($type);
-        return ($namespace ? $namespace . '\\' : '') . $type->getName();
+        $name = $this->extractArrayType($type->getName());
+
+        // if the given type is a XSD primitive type
+        if ($type->getSchema()->getTargetNamespace() === SchemaReader::XSD_NS) {
+            // convert to the corresponding PHP type
+            $qualifiedName = $this->convertXsdTypeToPhpType($name);
+        } else {
+            // preprend the namespace
+            $namespace = $this->inflectNamespace($type);
+            $qualifiedName = ($namespace ? $namespace . '\\' : '') . $name;
+        }
+
+        return $qualifiedName;
     }
 
     /**
@@ -121,5 +132,73 @@ class NamespaceInflector
         $result .= $this->inflectQualifiedName($type);
 
         return $result;
+    }
+
+
+    protected function extractArrayType($typeName)
+    {
+        $pregResult = preg_match('/^(ArrayOf(?<ArrayOf>\w+)|(?<braces>\w+)\[\])$/i', $typeName, $matches);
+
+        if ($pregResult === false) {
+            throw new \Exception(preg_last_error());
+        }
+
+        // if the given type is an array
+        if ($pregResult) {
+            $typeName = $matches['ArrayOf'] ? $matches['ArrayOf'] : $matches['braces'];
+        }
+
+        return $typeName;
+    }
+
+    /**
+     * Convert the given XSD primitive type into a corresponding PHP primitive type
+     *
+     * @param string $typeName
+     * @return string
+     * @throws \Exception
+     */
+    protected function convertXsdTypeToPhpType($typeName)
+    {
+        switch (strtolower($this->extractArrayType($typeName))) {
+            case "int":
+            case "integer":
+            case "long":
+            case "byte":
+            case "short":
+            case "negativeinteger":
+            case "nonnegativeinteger":
+            case "nonpositiveinteger":
+            case "positiveinteger":
+            case "unsignedbyte":
+            case "unsignedint":
+            case "unsignedlong":
+            case "unsignedshort":
+                $phpType = 'int';
+                break;
+            case "float":
+            case "double":
+            case "decimal":
+                $phpType = 'float';
+                break;
+            case "<anyxml>":
+            case "string":
+            case "token":
+            case "normalizedstring":
+            case "hexbinary":
+                $phpType = 'string';
+                break;
+            case "datetime":
+                $phpType =  '\DateTime';
+                break;
+            case 'anytype':
+                $phpType = 'mixed';
+                break;
+            default:
+                $phpType = $typeName;
+                break;
+        }
+
+        return $phpType;
     }
 }
