@@ -72,6 +72,12 @@ class ClassFactory implements ClassFactoryInterface
         $this->classmap = array();
     }
 
+    /**
+     * Create a skeleton class from the given XML type
+     *
+     * @param Type $type
+     * @return \Zend\Code\Generator\ClassGenerator
+     */
     protected function createClassFromType(Type $type)
     {
         $targetNamespace = $type->getSchema()->getTargetNamespace();
@@ -95,6 +101,11 @@ class ClassFactory implements ClassFactoryInterface
         return $class;
     }
 
+    /**
+     * Serialize to disk the given class code
+     *
+     * @param \Zend\Code\Generator\ClassGenerator $class
+     */
     protected function serializeClass(ClassGenerator $class)
     {
         // serialize the class
@@ -117,6 +128,11 @@ class ClassFactory implements ClassFactoryInterface
         file_put_contents($outputPath, $file->generate());
     }
 
+    /**
+     * Create an enum class from the given XML type
+     *
+     * @param \Goetas\XML\XSDReader\Schema\Type\Type $type
+     */
     public function createEnum(Type $type)
     {
         $class = $this->createClassFromType($type);
@@ -157,6 +173,11 @@ class ClassFactory implements ClassFactoryInterface
         $this->classmap[$class->getName()] = $class->getNamespaceName() . '\\' . $class->getName();
     }
 
+    /**
+     * Create a Data Transfer Object class from the given XML type
+     *
+     * @param \Goetas\XML\XSDReader\Schema\Type\Type $type
+     */
     public function createDTO(Type $type)
     {
         $class = $this->createClassFromType($type);
@@ -273,6 +294,11 @@ class ClassFactory implements ClassFactoryInterface
         $this->classmap[$class->getName()] = $class->getNamespaceName() . '\\' . $class->getName();
     }
 
+    /**
+     * Create a Service class from the given XML element
+     *
+     * @param \Sapone\Util\SimpleXMLElement $service
+     */
     public function createService(SimpleXMLElement $service)
     {
         // read the service name
@@ -344,6 +370,9 @@ class ClassFactory implements ClassFactoryInterface
         $this->classmap[$serviceClass->getName()] = $serviceClass->getNamespaceName() . '\\' . $serviceClass->getName();
     }
 
+    /**
+     * Create the classmap class for the generated classes
+     */
     public function createClassmap()
     {
         /*

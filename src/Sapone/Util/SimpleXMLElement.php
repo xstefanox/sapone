@@ -2,13 +2,19 @@
 
 namespace Sapone\Util;
 
-use Sapone\Command\GenerateCommand;
+use Goetas\XML\XSDReader\SchemaReader;
 
 /**
  * A SimpleXMLElement that automatically loads the XMLSchema and WSDL namespaces for XPath queries
  */
 class SimpleXMLElement extends \SimpleXMLElement
 {
+    /**
+     * The namespace of Web Service Definition Language specification
+     * @var string
+     */
+    const WSDL_NS = 'http://schemas.xmlsoap.org/wsdl/';
+
     /**
      * @param string $path The path to the XML document
      * @return SimpleXMLElement
@@ -22,6 +28,12 @@ class SimpleXMLElement extends \SimpleXMLElement
         return $xml;
     }
 
+    /**
+     * Parse a qualified XML type in the form 'ns:type'
+     *
+     * @param $name
+     * @return string[]
+     */
     public static function parseQualifiedXmlType($name)
     {
         preg_match('/^((?<prefix>\w+):)?(?<name>.*$)/', $name, $matches);
@@ -39,8 +51,8 @@ class SimpleXMLElement extends \SimpleXMLElement
      */
     protected function registerBaseXPathNamespaces()
     {
-        $this->registerXPathNamespace('xsd', GenerateCommand::NAMESPACE_XSD);
-        $this->registerXPathNamespace('wsdl', GenerateCommand::NAMESPACE_WSDL);
+        $this->registerXPathNamespace('xsd', SchemaReader::XSD_NS);
+        $this->registerXPathNamespace('wsdl', static::WSDL_NS);
     }
 
     /**
@@ -63,6 +75,11 @@ class SimpleXMLElement extends \SimpleXMLElement
         return $elements;
     }
 
+    /**
+     * Get the namespace of this XML element
+     *
+     * @return string
+     */
     public function getNamespace()
     {
         $parsedTypeName = static::parseQualifiedXmlType($this->getName());

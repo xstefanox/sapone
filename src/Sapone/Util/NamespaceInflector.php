@@ -7,6 +7,9 @@ use Goetas\XML\XSDReader\SchemaReader;
 use League\Url\Url;
 use Sapone\Config;
 
+/**
+ * Helper class used to translate a XML namespace into a PHP namespace
+ */
 class NamespaceInflector
 {
     /**
@@ -14,6 +17,9 @@ class NamespaceInflector
      */
     protected $config;
 
+    /**
+     * @param \Sapone\Config $config
+     */
     public function __construct(Config $config)
     {
         $this->config = $config;
@@ -102,12 +108,24 @@ class NamespaceInflector
         }
     }
 
+    /**
+     * Determine the fully qualified name of a type from the XMLSchema
+     *
+     * @param \Goetas\XML\XSDReader\Schema\Type\Type|\Sapone\Util\SimpleXMLElement $type
+     * @return string
+     */
     public function inflectQualifiedName(Type $type)
     {
         $namespace = $this->inflectNamespace($type);
         return ($namespace ? $namespace . '\\' : '') . $type->getName();
     }
 
+    /**
+     * Determine the fully qualified name of a type from the XMLSchema for a DocBlock comment, prepending the type with a '\'
+     *
+     * @param \Goetas\XML\XSDReader\Schema\Type\Type|\Sapone\Util\SimpleXMLElement $type
+     * @return string
+     */
     public function inflectDocBlockQualifiedName(Type $type)
     {
         return ($type->getSchema()->getTargetNamespace() !== SchemaReader::XSD_NS ? '\\' : '') . $this->inflectQualifiedName($type);

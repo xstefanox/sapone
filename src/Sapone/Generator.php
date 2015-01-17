@@ -6,9 +6,6 @@ use Goetas\XML\XSDReader\Schema\Type\ComplexType;
 use Goetas\XML\XSDReader\Schema\Type\SimpleType;
 use Goetas\XML\XSDReader\SchemaReader;
 use League\Url\Url;
-use Sapone\Builder\ClassBuilder;
-use Sapone\Builder\EnumBuilder;
-use Sapone\Builder\ServiceBuilder;
 use Sapone\Factory\ClassFactory;
 use Sapone\Util\SimpleXMLElement;
 use Symfony\Component\EventDispatcher\EventDispatcher;
@@ -20,6 +17,7 @@ class Generator
 {
     /**
      * The namespace of Web Service Definition Language specification
+     *
      * @var string
      */
     const WSDL_NS = 'http://schemas.xmlsoap.org/wsdl/';
@@ -27,21 +25,27 @@ class Generator
     /**
      * The generator configuration instance
      *
-     * @var Config
+     * @var \Sapone\Config
      */
     protected $config;
 
     /**
-     * @var EventDispatcher
+     * @var \Symfony\Component\EventDispatcher\EventDispatcher
      */
     protected $eventDispatcher;
 
+    /**
+     * @param \Sapone\Config $config
+     */
     public function __construct(Config $config)
     {
         $this->config = $config;
         $this->eventDispatcher = new EventDispatcher();
     }
 
+    /**
+     * Execute the code generation
+     */
     public function generate()
     {
         /*
@@ -194,18 +198,18 @@ class Generator
          * GENERATED CODE FIX
          */
 
-//        // create the coding standards fixer
-//        $fixer = new Fixer();
-//        $config = new FixerConfig();
-//        $config->setDir($this->config->getOutputPath());
-//
-//        // register all the existing fixers
-//        $fixer->registerBuiltInFixers();
-//        $config->fixers(array_filter($fixer->getFixers(), function (FixerInterface $fixer) {
-//            return $fixer->getLevel() === FixerInterface::PSR2_LEVEL;
-//        }));
-//
-//        // fix the generated code
-//        $fixer->fix($config);
+        // create the coding standards fixer
+        $fixer = new Fixer();
+        $config = new FixerConfig();
+        $config->setDir($this->config->getOutputPath());
+
+        // register all the existing fixers
+        $fixer->registerBuiltInFixers();
+        $config->fixers(array_filter($fixer->getFixers(), function (FixerInterface $fixer) {
+            return $fixer->getLevel() === FixerInterface::PSR2_LEVEL;
+        }));
+
+        // fix the generated code
+        $fixer->fix($config);
     }
 }
