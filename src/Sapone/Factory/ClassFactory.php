@@ -24,6 +24,9 @@ use Zend\Code\Generator\PropertyGenerator;
 use Zend\Code\Generator\ValueGenerator;
 use Zend\Code\Reflection\ClassReflection;
 
+/**
+ * Factory for the classes generated from the configured WSDL document
+ */
 class ClassFactory implements ClassFactoryInterface
 {
     /**
@@ -129,9 +132,7 @@ class ClassFactory implements ClassFactoryInterface
     }
 
     /**
-     * Create an enum class from the given XML type
-     *
-     * @param \Goetas\XML\XSDReader\Schema\Type\Type $type
+     * {@inheritdoc}
      */
     public function createEnum(Type $type)
     {
@@ -152,10 +153,21 @@ class ClassFactory implements ClassFactoryInterface
         $checks = $type->getRestriction()->getChecks();
 
         foreach ($checks['enumeration'] as $enum) {
-
             $property = new PropertyGenerator();
-            $property->setName(filter_var($enum['value'], FILTER_CALLBACK, array('options' => array($this, 'sanitizeVariableName'))));
-            $property->setName(filter_var($property->getName(), FILTER_CALLBACK, array('options' => array($this, 'sanitizeConstantName'))));
+            $property->setName(
+                filter_var(
+                    $enum['value'],
+                    FILTER_CALLBACK,
+                    array('options' => array($this, 'sanitizeVariableName'))
+                )
+            );
+            $property->setName(
+                filter_var(
+                    $property->getName(),
+                    FILTER_CALLBACK,
+                    array('options' => array($this, 'sanitizeConstantName'))
+                )
+            );
             $property->setConst(true);
             $property->setDefaultValue($enum['value']);
 
@@ -174,9 +186,7 @@ class ClassFactory implements ClassFactoryInterface
     }
 
     /**
-     * Create a Data Transfer Object class from the given XML type
-     *
-     * @param \Goetas\XML\XSDReader\Schema\Type\Type $type
+     * {@inheritdoc}
      */
     public function createDTO(Type $type)
     {
@@ -186,7 +196,6 @@ class ClassFactory implements ClassFactoryInterface
 
         // set the parent class
         if ($parentType) {
-
             $parentType = $parentType->getBase();
 
             if ($parentType->getSchema()->getTargetNamespace() !== SchemaReader::XSD_NS) {
@@ -207,7 +216,6 @@ class ClassFactory implements ClassFactoryInterface
 
         /* @var \Goetas\XML\XSDReader\Schema\Type\ComplexType $type */
         foreach ($type->getElements() as $element) {
-
             /* @var \Goetas\XML\XSDReader\Schema\Element\Element $element */
 
             $docElementType = $this->namespaceInflector->inflectDocBlockQualifiedName($element->getType());
@@ -234,11 +242,13 @@ class ClassFactory implements ClassFactoryInterface
 
             $property = new PropertyGenerator();
             $property->setDocBlock($doc);
-            $property->setName(filter_var($elementName, FILTER_CALLBACK, array('options' => array($this, 'sanitizeVariableName'))));
+            $property->setName(
+                filter_var($elementName, FILTER_CALLBACK, array('options' => array($this, 'sanitizeVariableName')))
+            );
             $property->setVisibility(
                 $this->config->isAccessors()
-                    ? AbstractMemberGenerator::VISIBILITY_PROTECTED
-                    : AbstractMemberGenerator::VISIBILITY_PUBLIC
+                ? AbstractMemberGenerator::VISIBILITY_PROTECTED
+                : AbstractMemberGenerator::VISIBILITY_PUBLIC
             );
 
             $class->addPropertyFromGenerator($property);
@@ -247,7 +257,11 @@ class ClassFactory implements ClassFactoryInterface
              * IMPORTS
              */
 
-            if ($element->getType()->getSchema()->getTargetNamespace() !== SchemaReader::XSD_NS and $this->namespaceInflector->inflectNamespace($element->getType()) !== $class->getNamespaceName()) {
+            if (
+                $element->getType()->getSchema()->getTargetNamespace() !== SchemaReader::XSD_NS
+                and
+                $this->namespaceInflector->inflectNamespace($element->getType()) !== $class->getNamespaceName()
+            ) {
                 $class->addUse($this->namespaceInflector->inflectQualifiedName($element->getType()));
             }
 
@@ -264,7 +278,6 @@ class ClassFactory implements ClassFactoryInterface
              */
 
             if ($this->config->isAccessors()) {
-
                 // create the setter
                 $setterDoc = new DocBlockGenerator();
                 $setterDoc->setTag($paramTag);
@@ -295,17 +308,23 @@ class ClassFactory implements ClassFactoryInterface
     }
 
     /**
-     * Create a Service class from the given XML element
-     *
-     * @param \Sapone\Util\SimpleXMLElement $service
+     * {@inheritdoc}
      */
     public function createService(SimpleXMLElement $service)
     {
         // read the service name
         $serviceName = (string) $service['name'];
         $serviceClassName = $serviceName;
-        $serviceClassName = filter_var($serviceClassName, FILTER_CALLBACK, array('options' => array($this, 'sanitizeVariableName')));
-        $serviceClassName = filter_var($serviceClassName, FILTER_CALLBACK, array('options' => array($this, 'sanitizeConstantName')));
+        $serviceClassName = filter_var(
+            $serviceClassName,
+            FILTER_CALLBACK,
+            array('options' => array($this, 'sanitizeVariableName'))
+        );
+        $serviceClassName = filter_var(
+            $serviceClassName,
+            FILTER_CALLBACK,
+            array('options' => array($this, 'sanitizeConstantName'))
+        );
 
         /*
          * CLASS CREATION
@@ -338,20 +357,40 @@ class ClassFactory implements ClassFactoryInterface
          */
 
         foreach ($service->xpath('.//wsdl:operation') as $operation) {
-
             $operationName = (string) $operation['name'];
-            $operationName = filter_var($operationName, FILTER_CALLBACK, array('options' => array($this, 'sanitizeVariableName')));
-            $operationName = filter_var($operationName, FILTER_CALLBACK, array('options' => array($this, 'sanitizeConstantName')));
+            $operationName = filter_var(
+                $operationName,
+                FILTER_CALLBACK,
+                array('options' => array($this, 'sanitizeVariableName'))
+            );
+            $operationName = filter_var(
+                $operationName,
+                FILTER_CALLBACK,
+                array('options' => array($this, 'sanitizeConstantName'))
+            );
 
-            $inputMessageType = $this->getTypeFromQualifiedString((string) current($operation->xpath('.//wsdl:input/@message')), $operation);
-            $outputMessageType = $this->getTypeFromQualifiedString((string) current($operation->xpath('.//wsdl:output/@message')), $operation);
+            $inputMessageType = $this->getTypeFromQualifiedString(
+                (string) current($operation->xpath('.//wsdl:input/@message')),
+                $operation
+            );
+            $outputMessageType = $this->getTypeFromQualifiedString(
+                (string) current($operation->xpath('.//wsdl:output/@message')),
+                $operation
+            );
 
             // read the service documentation
             $messageDoc = new DocBlockGenerator();
             $documentation = new Html2Text((string) current($operation->xpath('./wsdl:documentation')));
             $param = new ParameterGenerator('parameters', $inputMessageType);
-            $messageDoc->setTag(new ParamTag($param->getName(), $this->namespaceInflector->inflectDocBlockQualifiedName($inputMessageType)));
-            $messageDoc->setTag(new ReturnTag($this->namespaceInflector->inflectDocBlockQualifiedName($outputMessageType)));
+            $messageDoc->setTag(
+                new ParamTag(
+                    $param->getName(),
+                    $this->namespaceInflector->inflectDocBlockQualifiedName($inputMessageType)
+                )
+            );
+            $messageDoc->setTag(
+                new ReturnTag($this->namespaceInflector->inflectDocBlockQualifiedName($outputMessageType))
+            );
             if ($documentation->getText()) {
                 $messageDoc->setShortDescription($documentation->getText());
             }
@@ -371,7 +410,7 @@ class ClassFactory implements ClassFactoryInterface
     }
 
     /**
-     * Create the classmap class for the generated classes
+     * {@inheritdoc}
      */
     public function createClassmap()
     {

@@ -2,10 +2,25 @@
 
 namespace Sapone;
 
-
+/**
+ * Configuration object containing the current environment for the generetor
+ */
 class Config
 {
+    /**
+     * Identifies a PSR-0 namespace
+     * @see http://www.php-fig.org/psr/psr-0/
+     *
+     * @var string
+     */
     const AUTOLOADER_PSR0 = 'psr0';
+
+    /**
+     * Identifies a PSR-4 namespace
+     * @see http://www.php-fig.org/psr/psr-4/
+     *
+     * @var string
+     */
     const AUTOLOADER_PSR4 = 'psr4';
 
     /**
@@ -53,6 +68,9 @@ class Config
      */
     protected $nullConstructorArguments;
 
+    /**
+     * Build the configuration object
+     */
     public function __construct()
     {
         // set default values

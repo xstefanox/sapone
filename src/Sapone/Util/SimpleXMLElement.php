@@ -64,7 +64,6 @@ class SimpleXMLElement extends \SimpleXMLElement
 
         // in case of a successful query, ensure that the loaded elements register the needed namespaces
         if (is_array($elements)) {
-
             /* @var \Sapone\Util\SimpleXMLElement[] $elements */
 
             foreach ($elements as $element) {

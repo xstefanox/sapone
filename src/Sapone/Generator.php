@@ -13,6 +13,9 @@ use Symfony\CS\Fixer;
 use Symfony\CS\Config\Config as FixerConfig;
 use Symfony\CS\FixerInterface;
 
+/**
+ * SOAP client PHP code generator
+ */
 class Generator
 {
     /**
@@ -57,12 +60,10 @@ class Generator
         ), 'strlen'));
 
         if ($proxy) {
-
             $parsedWsdlPath = Url::createFromUrl($this->config->getWsdlDocumentPath());
 
             // if not fetching the wsdl file from filesystem and a proxy has been set
             if ($parsedWsdlPath->getScheme()->get() !== 'file') {
-
                 $proxy = Url::createFromUrl($proxy);
 
                 libxml_set_streams_context(
@@ -113,11 +114,14 @@ class Generator
         $processedSchemas = array();
 
         while (!empty($schemas)) {
-
             /* @var \Goetas\XML\XSDReader\Schema\Schema $currentSchema */
             $currentSchema = array_shift($schemas);
 
-            if (!in_array($currentSchema, $processedSchemas) and !in_array($currentSchema->getTargetNamespace(), $unusedSchemaNamespaces)) {
+            if (
+                !in_array($currentSchema, $processedSchemas)
+                and
+                !in_array($currentSchema->getTargetNamespace(), $unusedSchemaNamespaces)
+            ) {
                 $processedSchemas[] = $currentSchema;
                 $schemas = array_merge($schemas, $currentSchema->getSchemas());
             }
@@ -154,9 +158,7 @@ class Generator
         $classFactory = new ClassFactory($this->config, $schemas, $types);
 
         foreach ($types as $type) {
-
             if ($type instanceof SimpleType) {
-
                 // build the inheritance chain of the current SimpleType
 
                 /* @var \Goetas\XML\XSDReader\Schema\Type\SimpleType[] $inheritanceChain */
@@ -166,7 +168,6 @@ class Generator
 
                 // loop through the type inheritance chain untill the base type
                 while (end($inheritanceChain) !== null) {
-
                     $inheritanceChain[] = end($inheritanceChain)->getBase()->getParent();
                 }
 
@@ -179,10 +180,13 @@ class Generator
                 // now the last element of the chain is the base simple type
 
                 // enums are built only of string enumerations
-                if (end($inheritanceChain)->getBase()->getName() === 'string' and array_key_exists('enumeration', $type->getRestriction()->getChecks())) {
+                if (
+                    end($inheritanceChain)->getBase()->getName() === 'string'
+                    and
+                    array_key_exists('enumeration', $type->getRestriction()->getChecks())
+                ) {
                     $classFactory->createEnum($type);
                 }
-
             } elseif ($type instanceof ComplexType) {
                 $classFactory->createDTO($type);
             }

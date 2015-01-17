@@ -34,14 +34,10 @@ class NamespaceInflector
     public function inflectNamespace($type)
     {
         if ($type instanceof Type) {
-
             if ($type->getSchema()->getTargetNamespace() === SchemaReader::XSD_NS) {
-
                 // XMLSchema primitive types do not have a namespace
                 $namespace = null;
-
             } else {
-
                 $namespace = array();
 
                 // prepend the base namespace
@@ -50,7 +46,6 @@ class NamespaceInflector
                 }
 
                 if ($this->config->isAxisNamespaces()) {
-
                     // append the XMLSchema namespace, formatted in Apache Axis style
                     $url = Url::createFromUrl($type->getSchema()->getTargetNamespace());
 
@@ -63,20 +58,14 @@ class NamespaceInflector
                 }
 
                 $namespace = implode('\\', $namespace);
-
             }
 
             return $namespace;
-
         } elseif ($type instanceof SimpleXMLElement) {
-
             if ($type->getNamespace() === SchemaReader::XSD_NS) {
-
                 // XMLSchema primitive types do not have a namespace
                 $namespace = null;
-
             } else {
-
                 $namespace = array();
 
                 // prepend the base namespace
@@ -85,7 +74,6 @@ class NamespaceInflector
                 }
 
                 if ($this->config->isAxisNamespaces()) {
-
                     // append the XMLSchema namespace, formatted in Apache Axis style
                     $url = Url::createFromUrl($type->getNamespace());
 
@@ -98,13 +86,13 @@ class NamespaceInflector
                 }
 
                 $namespace = implode('\\', $namespace);
-
             }
 
             return $namespace;
-
         } else {
-            throw new \InvalidArgumentException('Expected an instance of Goetas\XML\XSDReader\Schema\Type\Type or Sapone\Util\SimpleXMLElement');
+            throw new \InvalidArgumentException(
+                'Expected an instance of Goetas\XML\XSDReader\Schema\Type\Type or Sapone\Util\SimpleXMLElement'
+            );
         }
     }
 
@@ -121,13 +109,17 @@ class NamespaceInflector
     }
 
     /**
-     * Determine the fully qualified name of a type from the XMLSchema for a DocBlock comment, prepending the type with a '\'
+     * Determine the fully qualified name of a type from the XMLSchema for a DocBlock comment, prepending the type with
+     * a '\'
      *
      * @param \Goetas\XML\XSDReader\Schema\Type\Type|\Sapone\Util\SimpleXMLElement $type
      * @return string
      */
     public function inflectDocBlockQualifiedName(Type $type)
     {
-        return ($type->getSchema()->getTargetNamespace() !== SchemaReader::XSD_NS ? '\\' : '') . $this->inflectQualifiedName($type);
+        $result = $type->getSchema()->getTargetNamespace() !== SchemaReader::XSD_NS ? '\\' : '';
+        $result .= $this->inflectQualifiedName($type);
+
+        return $result;
     }
 }

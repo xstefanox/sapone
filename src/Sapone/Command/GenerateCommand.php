@@ -10,6 +10,9 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
+/**
+ * Command class for the generator command line interface
+ */
 class GenerateCommand extends Command
 {
     protected function configure()
@@ -71,6 +74,9 @@ class GenerateCommand extends Command
             );
     }
 
+    /**
+     * {@inheritdoc}
+     */
     protected function execute(InputInterface $input, OutputInterface $output)
     {
         $config = new Config();
