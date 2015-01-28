@@ -1,0 +1,175 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<definitions xmlns:wsdlsoap="http://schemas.xmlsoap.org/wsdl/soap12/"
+             xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+             xmlns:sapone1="urn:example.org:test"
+             xmlns:sapone2="http://example.org/test"
+             xmlns="http://schemas.xmlsoap.org/wsdl/"
+             targetNamespace="urn:example.org:test" name="Service1">
+    <types>
+
+        <!-- types imported from an external schema, namespace sapone2 -->
+        <xsd:schema>
+            <xsd:import namespace="http://example.org/test"
+                        schemaLocation="http://localhost:8080/test/schema1.xsd" />
+        </xsd:schema>
+
+        <!-- builtin types, namespace sapone1 -->
+        <xsd:schema targetNamespace="urn:example.org:test"
+                    xmlns="http://www.w3.org/2001/XMLSchema">
+
+            <xsd:complexType name="Post">
+                <xsd:sequence>
+                    <xsd:element name="name" type="xsd:string" />
+                    <xsd:element name="author" type="sapone1:Author" />
+                </xsd:sequence>
+            </xsd:complexType>
+
+            <xsd:element name="Author" type="sapone1:Author" />
+            <xsd:complexType abstract="true" name="Author">
+                <xsd:sequence>
+                    <xsd:element name="firstname" type="xsd:string" />
+                    <xsd:element name="lastname" type="xsd:string" />
+                </xsd:sequence>
+            </xsd:complexType>
+
+            <xsd:complexType name="UserAuthor">
+                <xsd:complexContent>
+                    <xsd:extension base="sapone1:Author">
+                        <xsd:sequence>
+                            <xsd:element name="userid" type="xsd:string" />
+                        </xsd:sequence>
+                    </xsd:extension>
+                </xsd:complexContent>
+            </xsd:complexType>
+
+            <xsd:complexType name="GuestAuthor">
+                <xsd:complexContent>
+                    <xsd:extension base="sapone1:Author">
+                        <xsd:sequence>
+                            <xsd:element name="sign" type="xsd:string" />
+                        </xsd:sequence>
+                    </xsd:extension>
+                </xsd:complexContent>
+            </xsd:complexType>
+
+            <xsd:simpleType name="Environment">
+                <xsd:restriction base="xsd:string">
+                    <xsd:enumeration value="DEV" />
+                    <xsd:enumeration value="PROD" />
+                </xsd:restriction>
+            </xsd:simpleType>
+
+            <xsd:simpleType name="AgileEnvironment">
+                <xsd:restriction base="sapone1:Environment">
+                    <xsd:enumeration value="STAGING" />
+                </xsd:restriction>
+            </xsd:simpleType>
+
+            <!-- this sould be ignored -->
+            <xsd:simpleType name="Vote">
+                <xsd:restriction base="xsd:int">
+                    <xsd:enumeration value="0" />
+                    <xsd:enumeration value="1" />
+                    <xsd:enumeration value="2" />
+                    <xsd:enumeration value="3" />
+                    <xsd:enumeration value="1" />
+                </xsd:restriction>
+            </xsd:simpleType>
+
+            <!-- this sould be ignored -->
+            <xsd:simpleType name="Alpha">
+                <xsd:restriction base="xsd:string">
+                    <xsd:pattern value="[a-z]"/>
+                </xsd:restriction>
+            </xsd:simpleType>
+
+            <xsd:complexType name="Operation1Request">
+                <xsd:sequence>
+                    <xsd:element name="field1" type="xsd:string" />
+                    <xsd:element name="field2" type="xsd:token" />
+                    <xsd:element name="field3" type="xsd:hexBinary" />
+                    <xsd:element name="field4" type="xsd:int" />
+                    <xsd:element name="field5" type="xsd:byte" />
+                    <xsd:element name="field6" type="xsd:short" />
+                    <xsd:element name="field7" type="xsd:float" />
+                    <xsd:element name="field8" type="xsd:double" />
+                    <xsd:element name="field9" type="xsd:decimal" />
+                    <xsd:element name="field10" type="xsd:dateTime" />
+                </xsd:sequence>
+            </xsd:complexType>
+
+            <xsd:complexType name="Operation1Response">
+                <xsd:sequence>
+                    <xsd:element name="field1" type="xsd:string" />
+                </xsd:sequence>
+            </xsd:complexType>
+
+        </xsd:schema>
+
+    </types>
+
+    <message name="Operation1Request">
+        <part name="parameters" element="sapone1:Operation1Request"/>
+    </message>
+    <message name="Operation1Response">
+        <part name="parameters" element="sapone1:Operation1Response"/>
+    </message>
+
+    <message name="Operation2Request">
+        <part name="parameters" element="sapone2:Operation2Request"/>
+    </message>
+    <message name="Operation2Response">
+        <part name="parameters" element="sapone2:Operation2Response"/>
+    </message>
+
+    <portType name="Service1">
+
+        <operation name="operation1">
+            <input message="sapone1:Operation1Request" />
+            <output message="sapone1:Operation1Response" />
+        </operation>
+
+        <operation name="operation2">
+            <input message="sapone1:Operation2Request" />
+            <output message="sapone1:Operation2Response" />
+        </operation>
+
+    </portType>
+
+    <binding name="Service1PortBinding" type="sapone1:Service1">
+
+        <wsdlsoap:binding transport="http://schemas.xmlsoap.org/soap/http" />
+
+        <operation name="operation1">
+            <wsdlsoap:operation style="rpc" soapAction="" />
+            <input name="rpcEncodedRequest">
+                <wsdlsoap:body encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"
+                               namespace="urn:example.org:test"
+                               use="encoded" />
+            </input>
+            <output name="rpcEncodedResponse">
+                <wsdlsoap:body encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"
+                               namespace="urn:example.org:test"
+                               use="encoded" />
+            </output>
+        </operation>
+
+        <operation name="operation2">
+            <wsdlsoap:operation style="document" soapAction="" />
+            <input name="documentLiteralRequest">
+                <wsdlsoap:body namespace="urn:example.org:test" use="literal" />
+            </input>
+            <output name="documentLiteralResponse">
+                <wsdlsoap:body namespace="urn:example.org:test" use="literal" />
+            </output>
+        </operation>
+
+    </binding>
+    
+    <service name="Service1">
+        <port name="Service1Port" binding="sapone1:Service1PortBinding">
+            <wsdlsoap:address location="http://localhost:8080/service1" />
+        </port>
+    </service>
+    
+</definitions>

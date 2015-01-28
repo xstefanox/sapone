@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+        xmlns:sapone2="http://example.org/test"
+        version="1.0"
+        targetNamespace="http://example.org/test">
+
+    <import namespace="http://example.org/test"
+            schemaLocation="http://localhost:8080/test/schema2.xsd" />
+
+    <!-- this types are declared in namespace labeled sapone2 and refer some imported types,
+         declared in the same namespace -->
+
+    <complexType name="Operation2Request">
+        <sequence>
+            <element name="field1" type="sapone2:Type1" />
+        </sequence>
+    </complexType>
+
+    <complexType name="Operation2Response">
+        <sequence>
+            <element name="field2" type="sapone2:Type2" />
+        </sequence>
+    </complexType>
+    
+</schema>

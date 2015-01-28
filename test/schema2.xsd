@@ -1,0 +1,24 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+        xmlns:sapone3="http://example.org/test/3"
+        version="1.0"
+        targetNamespace="http://example.org/test">
+
+    <import namespace="http://example.org/test/3"
+            schemaLocation="http://localhost:8080/test/schema3.xsd" />
+
+    <!-- these types are declared in namespace labeled sapone2 -->
+
+    <complexType name="Type1">
+        <sequence>
+            <element name="field1" type="string" />
+        </sequence>
+    </complexType>
+
+    <complexType name="Type2">
+        <sequence>
+            <element name="field1" type="sapone3:Type3" />
+        </sequence>
+    </complexType>
+
+</schema>

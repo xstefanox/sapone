@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+        version="1.0"
+        targetNamespace="http://example.org/test/3">
+
+    <!-- this type is declared in namespace labeled sapone3; it is not actually refererred by any type involved in the
+         web service, but the corresponding class will be generated anyway -->
+
+    <complexType name="Type3">
+        <sequence>
+            <element name="field1" type="string" />
+        </sequence>
+    </complexType>
+
+</schema>
