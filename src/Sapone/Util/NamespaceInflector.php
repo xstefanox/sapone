@@ -97,6 +97,23 @@ class NamespaceInflector
     }
 
     /**
+     * Determine the name of a type from the XMLSchema
+     * @param Type $type
+     * @return string
+     */
+    public function inflectName(Type $type)
+    {
+        $name = $type->getName();
+
+        if ($type->getSchema()->getTargetNamespace() === SchemaReader::XSD_NS) {
+            // convert to the corresponding PHP type
+            $name = $this->convertXsdTypeToPhpType($name);
+        }
+
+        return $name;
+    }
+
+    /**
      * Determine the fully qualified name of a type from the XMLSchema
      *
      * @param \Goetas\XML\XSDReader\Schema\Type\Type|\Sapone\Util\SimpleXMLElement $type
