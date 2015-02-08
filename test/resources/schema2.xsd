@@ -5,7 +5,7 @@
         targetNamespace="http://example.org/test">
 
     <import namespace="http://example.org/test/3"
-            schemaLocation="http://localhost:8080/test/schema3.xsd" />
+            schemaLocation="schema3.xsd" />
 
     <!-- these types are declared in namespace labeled sapone2 -->
 

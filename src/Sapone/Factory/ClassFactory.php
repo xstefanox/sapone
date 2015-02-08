@@ -226,9 +226,16 @@ class ClassFactory implements ClassFactoryInterface
             // create a param and a param tag used in constructor and setter docs
             $param = new ParameterGenerator(
                 $elementName,
-                $this->namespaceInflector->inflectQualifiedName($element->getType())
+                $this->namespaceInflector->inflectName($element->getType())
             );
             $paramTag = new ParamTag($elementName, $docElementType);
+
+            // if the param type is not a PHP primitive type and its namespace is different that the class namespace
+            if ($type->getSchema()->getTargetNamespace() === SchemaReader::XSD_NS
+                and
+                $class->getNamespaceName() !== $this->namespaceInflector->inflectNamespace($element->getType())) {
+                $class->addUse($this->namespaceInflector->inflectQualifiedName($element->getType()));
+            }
 
             // set the parameter nullability
             if ($element->isNil() or $this->config->isNullConstructorArguments()) {

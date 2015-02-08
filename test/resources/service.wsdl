@@ -10,7 +10,7 @@
         <!-- types imported from an external schema, namespace sapone2 -->
         <xsd:schema>
             <xsd:import namespace="http://example.org/test"
-                        schemaLocation="http://localhost:8080/test/schema1.xsd" />
+                        schemaLocation="schema1.xsd" />
         </xsd:schema>
 
         <!-- builtin types, namespace sapone1 -->

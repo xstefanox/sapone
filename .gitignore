@@ -1,5 +1,5 @@
 /vendor/
 .idea
 composer.lock
-tmp
 /nbproject/
+/test/generated
